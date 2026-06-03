@@ -17,6 +17,17 @@ the *same* subject-grouped split:
 Emotion labels come from the 3-letter filename code: `TRE=sad`, `COE=angry`,
 `NEE=neutral`, `JOE=happy`.
 
+> **Status note on Approach A**: the current `random_forest` run is a *baseline*
+> that flattens the normalized pose windows — it does **not** yet use hand-crafted
+> expert features (`expr-featurize` / `features.build_feature_table` are not
+> implemented). The real expert-feature work is #20 (roadmap Phase 9); the
+> cross-team final comparison is #21 (Phase 10).
+
+**Further reading**: numeric results and the train-time differences between models
+are in [RESULTS.md](RESULTS.md); metric definitions (Macro-F1 vs F1, accuracy vs
+balanced accuracy) and what the current comparison actually measures are in
+[FAQ.md](FAQ.md).
+
 ## Design principles
 
 1. **Modular & swappable.** Every model implements one sklearn-style
