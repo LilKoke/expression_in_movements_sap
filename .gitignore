@@ -218,5 +218,6 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Project data and experiment artifacts (large / regenerable)
-data/
-outputs/
+# Anchored to repo root so it does not also match src/expr_movements/data/.
+/data/
+/outputs/
