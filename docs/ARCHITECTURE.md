@@ -49,6 +49,7 @@ src/expr_movements/
   run.py                    run dir + config<->artifact binding  [implemented]
   splits.py                 subject-grouped train/test splitting
   train.py / evaluate.py    orchestration + the A-vs-B comparison
+  viz.py                    Phase 7 figures (latent PCA / confusion / bars)
   data/
     trc.py                  TRC parsing + filename metadata
     dataset.py              manifest (jsonl) + sequence tensor (npz)
@@ -59,10 +60,14 @@ src/expr_movements/
     classic.py              approach A: random_forest, svm
     neural.py               approach B: lstm, cnn1d
   cli/                      thin entry points (expr-parse/-build-dataset/
-                            -featurize/-train/-evaluate)
+                            -featurize/-train/-evaluate/-report)
 tests/
 docs/ARCHITECTURE.md
 ```
+
+There is no `notebooks/` directory: the comparison/report figures are produced by
+a reproducible script (`expr-report`), not by hand in a notebook (see the
+anti-patterns below).
 
 ## Data flow
 
@@ -89,6 +94,11 @@ data/processed/features.parquet        approach A input  ──┤
                                             │
                                             ▼
                               expr-evaluate --compare A B  (evaluate.py)
+                                            │
+                                            ▼
+                              expr-report --run-a A --run-b B  (cli/report.py)
+                                evaluate.py + viz.py → outputs/report/
+                                comparison.md · protocol_comparison.md · figs/*.png
 ```
 
 ## Dataset persistence (Phase 2, #4)
@@ -215,6 +225,38 @@ inflate accuracy. All splitting is **subject-grouped** (`GroupKFold` /
 `GroupShuffleSplit` / leave-one-subject-out via `splits.py`), and approach A and
 B use the **identical** split so the comparison is valid.
 
+## Comparison & report (Phase 7, #13)
+
+The two approaches are compared **head-to-head on the same artifact contract** —
+every run, whichever team produced it, is an `outputs/<name>_<hash>/` dir with a
+`metrics.json`, so the comparison reads both through the same `evaluate_run`:
+
+- **`evaluate.compare_runs(A, B)`** — A (expert features) vs B (NN) on the *same*
+  LOSO split and metrics; it refuses runs with a different label space or split
+  protocol, so a comparison can't silently mix incomparable runs.
+- **`evaluate.compare_protocols(intra, loso)`** — one approach's intra-subject vs
+  inter-subject(LOSO) Macro-F1, surfacing the **gap = subject dependence** (intra
+  is directly comparable to Venture 2014's >90%; LOSO is the real task).
+- **`viz.py`** — the figures: latent PCA (emotion=colour, subject=marker),
+  confusion-matrix heatmaps, A-vs-B metric bars. matplotlib is imported lazily
+  and gated behind the optional `viz` extra (`uv sync --extra viz`), so the core
+  eval surface never needs it.
+
+**`expr-report`** (`cli/report.py`) is the thin driver that wires runs to the
+whole bundle in one reproducible command — no notebook:
+
+```
+expr-report --run-a outputs/<rf> --run-b outputs/<cnn1d> \
+            --run-b-intra outputs/<cnn1d_intra>
+  → outputs/report/{comparison.md, protocol_comparison.md, figs/*.png}
+```
+
+On the latent source: the per-fold held-out models are not persisted (only the
+final all-data model is), so the PCA encodes every window with that saved model —
+it is a *visualisation* of the learned latent, while the held-out separability
+**numbers** in `metrics.json` remain the honest generalisation signal; the two
+are read together.
+
 ## Early stopping (optional, Phase 8, #1)
 
 By default every NN trains for a flat `model.params.epochs` with **no validation
@@ -259,7 +301,9 @@ comparable: `experiment_cnn1d.yaml` (fixed 40 epochs) vs
 
 - God scripts — logic stays in `src/`, scripts are thin.
 - Hardcoded paths/params — everything in `configs/`.
-- Notebook-driven non-reproducibility — `notebooks/` is EDA only.
+- Notebook-driven non-reproducibility — there are no notebooks; comparison and
+  visualization run through `expr-report` (`cli/report.py` over `evaluate.py` +
+  `viz.py`), so every figure regenerates from a committed script.
 - Recomputing processed data every run — processed artifacts are persisted.
 - Subject leakage — grouped splits, shared across approaches.
 - Unpinned environment — `uv.lock` is committed.

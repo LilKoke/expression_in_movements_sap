@@ -16,6 +16,7 @@ import pytest
 
 matplotlib = pytest.importorskip("matplotlib")
 
+from expr_movements.cli.report import generate_report
 from expr_movements.config import ExperimentConfig, ModelConfig, SplitConfig, WindowConfig
 from expr_movements.evaluate import compare_runs
 from expr_movements.train import run_training
@@ -131,3 +132,45 @@ def test_plot_metric_comparison_writes_png(tmp_path):
     out = tmp_path / "bars.png"
     plot_metric_comparison(summary, out, level="clip_level")
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_generate_report_writes_full_bundle(tmp_path):
+    """expr-report's driver writes the reports + every figure into out_dir."""
+    run_a = _run_rf(tmp_path / "a")
+    run_b = _run_cnn(tmp_path / "b")
+    out_dir = generate_report(run_a, run_b, out_dir=tmp_path / "report")
+
+    assert (out_dir / "comparison.md").exists()
+    for fig in (
+        "compare_clip_level.png",
+        "compare_window_level.png",
+        "latent_pca.png",
+        "confusion_A_expert.png",
+        "confusion_B_nn.png",
+    ):
+        p = out_dir / "figs" / fig
+        assert p.exists() and p.stat().st_size > 0, fig
+    # No intra run given -> the protocol section is skipped, not errored.
+    assert not (out_dir / "protocol_comparison.md").exists()
+
+
+def test_generate_report_includes_protocol_when_intra_given(tmp_path):
+    run_a = _run_rf(tmp_path / "a")
+    run_b = _run_cnn(tmp_path / "b")
+    # An intra-subject NN run for the gap section.
+    processed = tmp_path / "intra"
+    processed.mkdir(parents=True, exist_ok=True)
+    _write_synthetic_npz(processed / "sequences.npz")
+    cfg = _cfg(
+        processed,
+        name="cnn1d_intra",
+        model_name="cnn1d",
+        params={"epochs": 6, "latent_dim": 8, "hidden_size": 16, "batch_size": 16},
+    )
+    cfg = cfg.model_copy(
+        update={"split": cfg.split.model_copy(update={"strategy": "intra_subject"})}
+    )
+    run_b_intra = run_training(cfg, outputs_root=tmp_path / "outputs_intra")
+
+    out_dir = generate_report(run_a, run_b, out_dir=tmp_path / "report", run_b_intra=run_b_intra)
+    assert (out_dir / "protocol_comparison.md").exists()

@@ -30,6 +30,7 @@ expr-build-dataset = "expr_movements.cli.build_dataset:main"
 expr-featurize = "expr_movements.cli.featurize:main"
 expr-train = "expr_movements.cli.train:main"
 expr-evaluate = "expr_movements.cli.evaluate:main"
+expr-report = "expr_movements.cli.report:main"
 
 [dependency-groups]
 dev = [
