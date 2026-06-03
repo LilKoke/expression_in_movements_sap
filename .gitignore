@@ -221,3 +221,5 @@ __marimo__/
 # Anchored to repo root so it does not also match src/expr_movements/data/.
 /data/
 /outputs/
+# Google Drive 配布用の data zip（DATA_SETUP.md 参照）。誤コミット防止。
+/expr-data-*.zip

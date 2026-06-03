@@ -22,7 +22,14 @@ import numpy as np
 import pytest
 
 from expr_movements.config import ExperimentConfig, ModelConfig, SplitConfig, WindowConfig
-from expr_movements.evaluate import compare_runs, evaluate_run, format_report
+from expr_movements.evaluate import (
+    compare_protocols,
+    compare_runs,
+    evaluate_run,
+    format_comparison,
+    format_protocol_comparison,
+    format_report,
+)
 from expr_movements.train import run_training
 
 
@@ -66,7 +73,7 @@ def _cfg(processed, *, name, model_name, params, strategy="leave_one_subject_out
 
 def _run_rf(tmp_path, **kw):
     processed = tmp_path / "processed"
-    processed.mkdir(exist_ok=True)
+    processed.mkdir(parents=True, exist_ok=True)
     _write_synthetic_npz(processed / "sequences.npz")
     cfg = _cfg(
         processed,
@@ -80,7 +87,7 @@ def _run_rf(tmp_path, **kw):
 
 def _run_cnn(tmp_path, **kw):
     processed = tmp_path / "processed"
-    processed.mkdir(exist_ok=True)
+    processed.mkdir(parents=True, exist_ok=True)
     _write_synthetic_npz(processed / "sequences.npz")
     cfg = _cfg(
         processed,
@@ -190,6 +197,58 @@ def test_evaluate_run_missing_metrics_raises(tmp_path):
         evaluate_run(empty)
 
 
-def test_compare_runs_is_phase7_stub(tmp_path):
-    with pytest.raises(NotImplementedError):
-        compare_runs("a", "b", tmp_path / "cmp.md")
+# -- Phase 7 (#13): A-vs-B comparison + intra-vs-inter protocol ----------------
+
+
+def test_compare_runs_side_by_side(tmp_path):
+    """compare_runs folds two same-split runs into one A-vs-B summary + report."""
+    run_a = _run_rf(tmp_path / "a")
+    run_b = _run_cnn(tmp_path / "b")
+
+    out = tmp_path / "comparison.md"
+    summary = compare_runs(run_a, run_b, out)
+
+    assert summary["kind"] == "compare_runs"
+    assert summary["split_strategy"] == "leave_one_subject_out"
+    # Both runs appear in the headline table at both levels.
+    assert len(summary["table"]) == 2
+    for run_metrics in summary["table"].values():
+        for level in ("clip_level", "window_level"):
+            assert "macro_f1" in run_metrics[level]
+    # Only the NN side carries latent separability.
+    sep_present = [("separability" in m) for m in summary["table"].values()]
+    assert sep_present.count(True) == 1
+
+    report = format_comparison(summary)
+    assert "Approach comparison" in report
+    assert "Macro-F1 (primary)" in report
+    assert out.read_text() == report  # written to disk too
+
+
+def test_compare_runs_rejects_mismatched_split(tmp_path):
+    """A-vs-B must use the same split protocol — otherwise it's not like-for-like."""
+    loso = _run_rf(tmp_path / "loso")
+    intra = _run_rf(tmp_path / "intra", strategy="intra_subject", n_splits=3)
+    with pytest.raises(ValueError, match="same split"):
+        compare_runs(loso, intra, tmp_path / "cmp.md")
+
+
+def test_compare_protocols_reports_gap(tmp_path):
+    """compare_protocols surfaces the intra-minus-LOSO Macro-F1 gap."""
+    intra = _run_rf(tmp_path / "intra", strategy="intra_subject", n_splits=3)
+    loso = _run_rf(tmp_path / "loso", strategy="leave_one_subject_out")
+
+    summary = compare_protocols(intra, loso, tmp_path / "protocols.md")
+    assert summary["kind"] == "compare_protocols"
+    assert "clip_level" in summary["macro_f1_gap"]
+    report = format_protocol_comparison(summary)
+    assert "Intra-subject vs inter-subject" in report
+    assert "Gap" in report
+
+
+def test_compare_protocols_rejects_wrong_order(tmp_path):
+    """Passing a LOSO run where an intra run is expected is rejected."""
+    loso = _run_rf(tmp_path / "loso")
+    intra = _run_rf(tmp_path / "intra", strategy="intra_subject", n_splits=3)
+    with pytest.raises(ValueError, match="intra-subject"):
+        compare_protocols(loso, intra, tmp_path / "p.md")
