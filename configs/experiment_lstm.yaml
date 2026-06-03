@@ -10,9 +10,13 @@ data:
   trim_start_frames: 0
   trim_end_frames: 0
 
-split:
-  strategy: group_kfold   # subject-grouped — required to avoid leakage
-  n_splits: 5
+window:                   # same windowing as experiment_rf.yaml -> fair A-vs-B
+  length: 64
+  stride: 16
+
+split:                    # same folds as experiment_rf.yaml -> fair A-vs-B
+  strategy: leave_one_subject_out
+  n_splits: 4
   seed: 42
 
 model:

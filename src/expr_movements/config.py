@@ -78,12 +78,47 @@ class DataConfig(_Strict):
 
 
 class SplitConfig(_Strict):
-    """Train/test split. MUST be subject-grouped to avoid leakage (see docs)."""
+    """Train/test split protocol (Phase 4, #6).
 
-    strategy: str = "group_kfold"  # group_kfold | group_shuffle | leave_one_subject_out
-    n_splits: int = Field(5, ge=2)
-    test_size: float = Field(0.2, gt=0, lt=1)
+    Two evaluation protocols, both leakage-safe, switched by ``strategy``:
+
+    * **inter-subject** — the test subject's clips never appear in train.
+      ``leave_one_subject_out`` (the real task here, 4 subjects -> 4 folds) is
+      the default; ``group_kfold`` / ``group_shuffle`` are the same idea with a
+      fixed fold count / random held-out group.
+    * **intra-subject** — split *within* each subject for direct comparison with
+      the source paper's >90% (Venture et al. 2014). The split is at the *trial*
+      (file/clip) level, never the window level, so windows from one clip never
+      straddle train/test. ``n_splits`` folds per subject.
+
+    Windows inherit their clip's subject and trial id, so both protocols are
+    enforced on the clip grouping, not the expanded window rows — see
+    ``splits.iter_splits``.
+    """
+
+    strategy: str = "leave_one_subject_out"
+    # group_kfold | group_shuffle | leave_one_subject_out | intra_subject
+    n_splits: int = Field(4, ge=2)  # 4 subjects -> 4 LOSO folds by default
+    test_size: float = Field(0.2, gt=0, lt=1)  # group_shuffle only
     seed: int = 42
+
+
+class WindowConfig(_Strict):
+    """Fixed-length sliding window over each clip (Phase 4, #6).
+
+    The prediction unit is an ``length``-frame window, not a whole clip;
+    clip-level conclusions are recovered later by majority vote over a clip's
+    windows. A window of ``length`` frames is taken every ``stride`` frames along
+    each clip. Clips shorter than ``length`` yield a single window (zero-padded
+    to ``length`` with a real-frame ``mask``) so no short clip is dropped.
+
+    ``length`` should not exceed the shortest clip's frame count if padding is to
+    be avoided; the bundled data trims to ~73 frames minimum, so the default 64
+    leaves headroom.
+    """
+
+    length: int = Field(64, ge=1)
+    stride: int = Field(16, ge=1)
 
 
 class ModelConfig(_Strict):
@@ -103,6 +138,7 @@ class ExperimentConfig(_Strict):
     name: str
     seed: int = 42
     data: DataConfig = Field(default_factory=DataConfig)
+    window: WindowConfig = Field(default_factory=WindowConfig)
     split: SplitConfig = Field(default_factory=SplitConfig)
     model: ModelConfig
 

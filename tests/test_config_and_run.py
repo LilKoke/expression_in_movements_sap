@@ -17,11 +17,15 @@ from expr_movements.run import config_hash, create_run_dir
 def test_load_experiment_configs():
     rf = load_experiment("configs/experiment_rf.yaml")
     assert rf.model.name == "random_forest"
-    assert rf.split.strategy == "group_kfold"
+    assert rf.split.strategy == "leave_one_subject_out"  # LOSO is the default protocol
+    assert rf.window.length == 64  # sliding-window prediction unit
 
     lstm = load_experiment("configs/experiment_lstm.yaml")
     assert lstm.model.name == "lstm"
     assert lstm.model.params["hidden_size"] == 128
+    # A and B must share the same windowing + folds for a fair comparison.
+    assert lstm.split.strategy == rf.split.strategy
+    assert lstm.window == rf.window
 
 
 def test_registry_has_both_approaches():
