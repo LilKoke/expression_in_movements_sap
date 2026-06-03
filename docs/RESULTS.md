@@ -265,8 +265,9 @@ SALE .25}`。PAIB が大きく改善する一方 NABA は低下、SALE は両者
    （0.630→0.675）だが std 大・アーキ依存。少データの不安定性は解消しきれていない。
 
 ### 残課題（ロードマップ）
-- **本物の expert features の実装**（#20 / Phase 9）: 速度/加速度/jerk 統計、体幹傾き・
-  頭部向き角、gait cadence、関節角レンジ等。これが揃って初めて course 要件の比較になる。
+- **本物の expert features の実装**（#20 / Phase 9）: 手作り特徴量の設計・計算（**特徴量の
+  中身は相手チームに一任**）。これが揃って初めて course 要件の比較になる。FYI として出典論文
+  Venture 2014 は velocity / 体幹傾き / 頭部向きを手がかりにしている。
 - **チーム間最終比較**（#21 / Phase 10）: 手法A(expert)・手法B(NN)を同一 LOSO で head-to-head、
   latent PCA vs feature PCA、解釈性 vs 精度トレードオフの考察。
 - （任意）**不変化前処理の ablation**: yaw/骨盤ローカル/速度チャネルの有無で精度がどう変わるか
