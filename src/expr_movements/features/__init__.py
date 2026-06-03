@@ -1,11 +1,15 @@
-"""Expert/hand-crafted feature extraction for approach A.
+"""Feature/representation building.
 
-Turns per-clip pose sequences into a fixed-length feature vector (e.g. velocity
-/ acceleration statistics, joint-angle ranges, gait cadence, posture
-descriptors). Output is a Parquet feature table: one row per clip, plus subject
-and emotion columns for grouped splitting.
+Two distinct things live here:
 
-Implementation lands in the feature-engineering phase (see issues from #1).
+- :mod:`expr_movements.features.preprocess` — the **invariant pre-processing**
+  (Phase 3, #5): pelvis-local coordinates + yaw alignment + a speed channel.
+  This is shared by both modeling approaches and is applied by
+  ``data/dataset.py`` when building ``sequences.npz`` (the common contract).
+- :func:`build_feature_table` below — **approach-A expert features** (velocity /
+  acceleration statistics, joint-angle ranges, gait cadence, posture
+  descriptors) into a Parquet table. Per the #1 roadmap v2 this is the
+  expert-feature *team's* work and is left as a stub here.
 """
 
 from __future__ import annotations
