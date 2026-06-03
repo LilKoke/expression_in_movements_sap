@@ -1,104 +1,99 @@
-# Architecture
+# アーキテクチャ
 
-Code architecture for this project — the file/dependency structure, script
-granularity, and the conventions that keep it modular, config-driven and
-reproducible. This is the deliverable of issue #2 (実装環境の整備); the modeling
-work itself is split into the phase issues linked from #1.
+本プロジェクトのコードアーキテクチャ — ファイル/依存構成、スクリプトの粒度、そして
+モジュール性・config 駆動・再現性を保つための規約をまとめる。これは issue #2
+（実装環境の整備）の成果物であり、モデリング作業自体は #1 にぶら下がる各 Phase issue に
+分割されている。
 
-## Goal
+## 目的
 
-Classify expressive walking motion (motion-capture **TRC**, 41 markers × XYZ
-time series) into 4 emotion classes, and **compare two modeling approaches** on
-the *same* subject-grouped split:
+表情豊かな歩行動作（モーションキャプチャ **TRC**、41 マーカー × XYZ 時系列）を 4 つの
+感情クラスに分類し、**2つのモデリング手法**を**同一の被験者グループ分割**の上で比較する:
 
-- **Approach A** — expert / hand-crafted features + classic ML (RandomForest / SVM)
-- **Approach B** — a neural network (LSTM / 1D-CNN) on raw pose sequences
+- **手法A** — expert / 手作り特徴量 + 古典ML（RandomForest / SVM）
+- **手法B** — 生の姿勢系列に対するニューラルネット（LSTM / 1D-CNN）
 
-Emotion labels come from the 3-letter filename code: `TRE=sad`, `COE=angry`,
-`NEE=neutral`, `JOE=happy`.
+感情ラベルはファイル名の 3 文字コードに由来: `TRE=sad`, `COE=angry`, `NEE=neutral`,
+`JOE=happy`。
 
-> **Status note on Approach A**: the current `random_forest` run is a *baseline*
-> that flattens the normalized pose windows — it does **not** yet use hand-crafted
-> expert features (`expr-featurize` / `features.build_feature_table` are not
-> implemented). The real expert-feature work is #20 (roadmap Phase 9); the
-> cross-team final comparison is #21 (Phase 10).
+> **手法A の現状に関する注記**: 現状の `random_forest` run は、正規化済み姿勢窓を flatten
+> しただけの**ベースライン**であり、**まだ手作り expert features を使っていない**
+> （`expr-featurize` / `features.build_feature_table` は未実装）。本物の expert feature 作業は
+> #20（ロードマップ Phase 9）、チーム間の最終比較は #21（Phase 10）。
 
-**Further reading**: numeric results and the train-time differences between models
-are in [RESULTS.md](RESULTS.md); metric definitions (Macro-F1 vs F1, accuracy vs
-balanced accuracy) and what the current comparison actually measures are in
-[FAQ.md](FAQ.md); the no-GPU / Google-Drive data setup for collaborators without
-the gitignored `data/` is in [DATA_SETUP.md](DATA_SETUP.md).
+**関連ドキュメント**: 数値結果とモデルごとの学習方法の違いは [RESULTS.md](RESULTS.md)、
+指標の定義（Macro-F1 と F1、accuracy と balanced accuracy）と現状の比較が実際に何を測って
+いるかは [FAQ.md](FAQ.md)、gitignore された `data/` を持たない・GPU の無いメンバー向けの
+Google Drive データ取得手順は [DATA_SETUP.md](DATA_SETUP.md) を参照。
 
-## Design principles
+## 設計原則
 
-1. **Modular & swappable.** Every model implements one sklearn-style
-   `fit/predict` interface and is selected by config name through a registry, so
-   approach A ↔ B is a one-line config change and the same training/eval harness
-   drives both.
-2. **Config-driven.** All hyperparameters live in `configs/*.yaml`, validated by
-   Pydantic at startup. No hardcoded params in code.
-3. **Reproducible — params + model output together.** Each run writes the
-   *resolved* config, model checkpoint, metrics and provenance metadata into one
-   immutable directory keyed by a hash of the config.
-4. **Persist processed data, don't recompute.** raw → interim → processed, with
-   processed datasets written to disk (Parquet / npz / JSONL) and reloaded.
-5. **Thin scripts, fat library.** CLI entry points only parse args and delegate;
-   all logic lives in `src/expr_movements/`.
+1. **モジュール化・差し替え可能**。各モデルは sklearn 風の `fit/predict` インターフェースを
+   1つ実装し、registry を通じて config 名で選択される。よって手法A ↔ B は config の 1 行
+   変更で済み、同じ学習/評価 harness が両方を駆動する。
+2. **config 駆動**。全ハイパーパラメータは `configs/*.yaml` にあり、起動時に Pydantic で
+   検証される。コード中にハードコードされたパラメータは無い。
+3. **再現可能 — パラメータとモデル出力を一緒に**。各 run は**解決済み** config・モデル
+   チェックポイント・指標・来歴メタデータを、config のハッシュをキーにした 1 つの不変
+   ディレクトリに書き出す。
+4. **処理済みデータは永続化し、再計算しない**。raw → interim → processed と進み、processed
+   データセットはディスク（Parquet / npz / JSONL）に書いて再読み込みする。
+5. **スクリプトは薄く、ライブラリは厚く**。CLI エントリポイントは引数解析と委譲だけ。
+   ロジックはすべて `src/expr_movements/` に置く。
 
-## Repository layout
+## リポジトリ構成
 
 ```
-configs/                  experiment YAMLs (versioned)
-  experiment_rf.yaml         approach A
-  experiment_lstm.yaml       approach B
-data/                     GITIGNORED (large / regenerable)
-  raw/                       original .trc — immutable
-  interim/                   parsed/cleaned per-clip arrays
+configs/                  実験 YAML（バージョン管理対象）
+  experiment_rf.yaml         手法A
+  experiment_lstm.yaml       手法B
+data/                     GITIGNORE 対象（大きい / 再生成可能）
+  raw/                       元の .trc — 不変
+  interim/                   パース/クリーニング済みの clip 単位配列
   processed/                 manifest.jsonl + features.parquet + sequences.npz
-outputs/                  GITIGNORED — per-run artifacts (see below)
+outputs/                  GITIGNORE 対象 — run 単位の成果物（後述）
 src/expr_movements/
-  config.py                 Pydantic schemas; load_experiment()
-  run.py                    run dir + config<->artifact binding  [implemented]
-  splits.py                 subject-grouped train/test splitting
-  train.py / evaluate.py    orchestration + the A-vs-B comparison
-  viz.py                    Phase 7 figures (latent PCA / confusion / bars)
+  config.py                 Pydantic スキーマ; load_experiment()
+  run.py                    run ディレクトリ + config↔成果物の紐付け
+  splits.py                 被験者グループ分割（train/test）
+  train.py / evaluate.py    オーケストレーション + A vs B 比較
+  viz.py                    Phase 7 の図（latent PCA / 混同行列 / 棒グラフ）
   data/
-    trc.py                  TRC parsing + filename metadata
-    dataset.py              manifest (jsonl) + sequence tensor (npz)
+    trc.py                  TRC パース + ファイル名メタデータ
+    dataset.py              manifest (jsonl) + 系列テンソル (npz)
   features/__init__.py      expert features -> feature table (parquet)
   models/
-    base.py                 BaseClassifier (sklearn interface)  [implemented]
-    registry.py             register() / build_model()          [implemented]
-    classic.py              approach A: random_forest, svm
-    neural.py               approach B: lstm, cnn1d
-  cli/                      thin entry points (expr-parse/-build-dataset/
-                            -featurize/-train/-evaluate/-report)
+    base.py                 BaseClassifier（sklearn インターフェース）
+    registry.py             register() / build_model()
+    classic.py              手法A: random_forest, svm
+    neural.py               手法B: lstm, cnn1d
+  cli/                      薄いエントリポイント（expr-parse/-build-dataset/
+                            -featurize/-train/-evaluate/-report）
 tests/
 docs/ARCHITECTURE.md
 ```
 
-There is no `notebooks/` directory: the comparison/report figures are produced by
-a reproducible script (`expr-report`), not by hand in a notebook (see the
-anti-patterns below).
+`notebooks/` ディレクトリは存在しない: 比較/レポートの図は手作業の notebook ではなく
+**再現可能なスクリプト（`expr-report`）**で生成する（後述のアンチパターン参照）。
 
-## Data flow
+## データフロー
 
 ```
 data/raw/*.trc
    │  expr-parse        (data/trc.py)
    ▼
-data/interim/*          per-clip arrays + filename metadata
+data/interim/*          clip 単位配列 + ファイル名メタデータ
    │  expr-build-dataset (data/dataset.py)
    ▼
-data/processed/manifest.jsonl          human-inspectable clip/label index
-data/processed/sequences.npz           approach B input  ──┐
-   │  expr-featurize    (features/)                         │
-   ▼                                                        │
-data/processed/features.parquet        approach A input  ──┤
-                                                            ▼
+data/processed/manifest.jsonl          人が読める clip/ラベル索引
+data/processed/sequences.npz           手法B の入力  ──┐
+   │  expr-featurize    (features/)                     │
+   ▼                                                    │
+data/processed/features.parquet        手法A の入力  ──┤
+                                                        ▼
                               expr-train --config …  (train.py)
-                                build_model(name, **params) over
-                                subject-grouped splits (splits.py)
+                                build_model(name, **params) を
+                                被験者グループ分割 (splits.py) 上で実行
                                             │
                                             ▼
                               outputs/<name>_<config-hash>/
@@ -113,149 +108,131 @@ data/processed/features.parquet        approach A input  ──┤
                                 comparison.md · protocol_comparison.md · figs/*.png
 ```
 
-## Dataset persistence (Phase 2, #4)
+## データセット永続化（Phase 2, #4）
 
-`expr-build-dataset` (`data/dataset.py`) turns the parsed interim clips into two
-persisted artifacts under `data/processed/`, so modeling never re-parses raw TRC:
+`expr-build-dataset`（`data/dataset.py`）はパース済み interim clip を `data/processed/` の
+下の 2 つの永続成果物に変換する。これによりモデリングが生 TRC を再パースすることはない:
 
-- **`manifest.jsonl`** — one JSON line per clip: interim path, subject, emotion
-  (code + name), take, raw frame count, and the kept `[trim_start, trim_stop)`
-  window with its length. Human-inspectable; it is the index the sequence build
-  consumes.
-- **`sequences.npz`** — the approach-B input (see *length handling* below).
+- **`manifest.jsonl`** — clip ごとに 1 行の JSON: interim パス、被験者、感情（コード + 名前）、
+  テイク、生フレーム数、採用した `[trim_start, trim_stop)` 窓とその長さ。人が読める索引で、
+  系列ビルドが消費する。
+- **`sequences.npz`** — 手法B の入力（後述の*長さの扱い*参照）。
 
-**Trimming (motion onset/offset).** Each clip has standing/idle frames before
-the first step and after the last. With `DataConfig.detect_onset` (default on)
-the active walking window is found from **marker speed**: per frame, the mean
-inter-frame displacement over markers (NaN-robust, so occluded markers are
-ignored); a frame is "moving" once that exceeds `onset_speed_frac` of the clip's
-peak, and onset/offset are the first/last runs of `onset_min_run` consecutive
-moving frames. `trim_start_frames` / `trim_end_frames` then apply as an extra
-fixed margin *inside* that window. A clip is never trimmed to empty — if the
-margins would do so they are skipped. (On the bundled data this drops a median
-of ~50 leading/trailing static frames per clip.) Detection params live in
-`DataConfig`, so the policy is config-driven and recorded in the resolved config.
+**トリミング（動作 onset/offset）**。各 clip には最初の一歩の前と最後の一歩の後に立ち
+止まり/アイドルのフレームがある。`DataConfig.detect_onset`（既定 ON）では、活動歩行窓を
+**マーカー速度**から求める: フレームごとにマーカー間のフレーム間変位平均（NaN 耐性、よって
+オクルージョンされたマーカーは無視）を取り、それが clip のピークの `onset_speed_frac` を
+超えたフレームを「動いている」とみなし、`onset_min_run` 連続で動いているフレームの最初/最後を
+onset/offset とする。`trim_start_frames` / `trim_end_frames` はその窓の*内側*に追加の固定
+マージンとして適用される。clip が空になるまでトリムされることはない（マージンで空になるなら
+スキップ）。（同梱データではこれにより clip あたり中央値 ~50 の先頭/末尾静止フレームが除去
+される。）検出パラメータは `DataConfig` にあり、ポリシーは config 駆動で解決済み config に
+記録される。
 
-**Variable-length handling (decision).** Clip lengths vary (≈73–372 frames on
-the bundled data). Rather than bake a fixed frame count into the dataset, the
-**canonical** store is *variable-length*: `sequences` is an object array of
-per-clip `(T_i, 41*3)` float32 arrays (already onset-trimmed), carried with
-`lengths`, `labels`, `emotion_codes`, `subjects`, `clips` and `marker_names`.
+**可変長の扱い（決定事項）**。clip の長さはばらつく（同梱データで約 73〜372 フレーム）。
+固定フレーム数をデータセットに焼き込むのではなく、**正準（canonical）**ストアを*可変長*とする:
+`sequences` は clip 単位の `(T_i, 41*3)` float32 配列（onset トリム済み）の object 配列で、
+`lengths`・`labels`・`emotion_codes`・`subjects`・`clips`・`marker_names` を伴う。
 
-Rationale: the modeling frame count is a *training-time* hyperparameter we want
-to sweep (and to support sliding-window augmentation). Slicing a fixed window /
-length out of the variable-length arrays is an in-memory numpy operation on a
-few tens of MB — milliseconds, cheaper than the disk read — so there is no
-speed reason to freeze `N` at build time, and zero-padding up front would force
-every consumer to carry a mask to avoid training on fake frames. Persisting the
-true-length sequences keeps that decision out of the dataset.
+理由: モデリングのフレーム数はスイープしたい*学習時*のハイパーパラメータ（さらにスライディング
+窓による拡張もサポートしたい）。可変長配列から固定窓/長さを切り出すのは数十 MB のメモリ上
+numpy 操作で、ミリ秒オーダー・ディスク読み込みより安い。よって `N` をビルド時に凍結する速度的
+理由は無く、前もってゼロパディングすると全消費側が偽フレームで学習しないためのマスクを持つ
+羽目になる。真の長さの系列を永続化することでその決定をデータセットの外に出す。
 
-For callers that *do* want a ready-made fixed tensor, `--target-frames N`
-additionally writes a dense `sequences_dense` `(n_clips, N, 41*3)` (pad with
-zeros / truncate to `N`) plus a boolean `mask` marking the real frames. This is
-reproducible from the canonical store at any time, so freezing an `N` is a
-re-run, not a one-way door.
+固定テンソルが欲しい呼び出し側のために、`--target-frames N` は密な `sequences_dense`
+`(n_clips, N, 41*3)`（ゼロパディング / `N` で切り詰め）と、実フレームを示す bool `mask` を
+追加で書き出す。これは正準ストアからいつでも再現できるので、`N` の凍結は「再実行」であって
+不可逆な選択ではない。
 
-**CSV output (#1).** The course brief asks for a `(coordinates, class)` dataset
-"as CSV". We persist the modeling artifacts as JSONL + npz instead (npz is the
-natural dense/ragged numeric container and avoids stringifying ~10⁶ floats per
-clip), and treat CSV as an *export* concern rather than the working format. A
-flat CSV of `manifest.jsonl` (one row per clip, the label and frame window) is a
-trivial `pandas.read_json(lines=True).to_csv(...)`; a long-format
-`(clip, frame, marker, x, y, z, emotion)` CSV is derivable from `sequences.npz`
-when an assignment deliverable needs it. Keeping the working store binary and
-generating CSV on demand avoids carrying a redundant, bulky third copy.
+**CSV 出力（#1）**。課題ブリーフは `(座標, クラス)` データセットを「CSV で」と求めている。
+本プロジェクトはモデリング成果物を JSONL + npz として永続化し（npz は密/不規則な数値コンテナ
+として自然で、clip あたり ~10⁶ の float を文字列化せずに済む）、CSV は*エクスポート*の関心事
+として扱う。`manifest.jsonl` のフラット CSV（clip 1 行・ラベルとフレーム窓）は
+`pandas.read_json(lines=True).to_csv(...)` で自明。long 形式の
+`(clip, frame, marker, x, y, z, emotion)` CSV は提出物が必要なときに `sequences.npz` から
+導出できる。作業ストアをバイナリに保ち CSV を必要時に生成することで、冗長で嵩張る 3 つ目の
+コピーを持たずに済む。
 
-## Invariant pre-processing (Phase 3, #5)
+## 不変化前処理（Phase 3, #5）
 
-The classifier must key on *how* a subject moves, not *where* in the capture
-volume they walked or *which way* they faced. So before a clip's trimmed pose
-sequence is stored in `sequences.npz`, `features/preprocess.py`
-(`normalize_sequence`) makes it **position- and heading-invariant**, while
-deliberately **keeping walking speed** as an explicit channel (speed tracks
-arousal — a strong emotion cue, per Venture et al. 2014, the source paper for
-this data). This is the **common representation** consumed by both modeling
-teams (per the #1 roadmap v2, Phase 3 stops here — no derived expert features
-are computed in this repo; that is the other team's approach-A work).
+分類器は被験者が*どこで*歩いたか・*どちら向き*だったかではなく、*どう*動くかを手がかりに
+すべき。そこで clip のトリム済み姿勢系列を `sequences.npz` に格納する前に、
+`features/preprocess.py`（`normalize_sequence`）が**位置・向きに対して不変**にしつつ、
+**歩行速度は明示的なチャネルとして意図的に残す**（速度は arousal を反映する強い感情手がかり。
+本データの出典論文 Venture et al. 2014）。これは両モデリングチームが消費する**共通表現**で
+ある（#1 ロードマップ v2 では Phase 3 はここで止まる — 派生 expert features はこのリポジトリ
+では計算せず、それは別チームの手法A の作業）。
 
-Per clip, in order:
+clip ごとに、順に:
 
-1. **Pelvis-centred local coordinates.** Each frame is translated so the
-   centroid of the four pelvis markers (`LFWT/RFWT/LBWT/RBWT`) sits at the
-   origin — removing absolute walking position and the slow drift across the
-   room. Markers carry a per-subject prefix (`NABA_LFWT`); they are matched by
-   the bare token after the last `_`. The centroid is NaN-robust, so an occluded
-   pelvis marker doesn't poison it; a frame with *no* pelvis markers is left
-   unshifted rather than dropped.
-2. **Yaw alignment** (`yaw_align`, default on). Each frame is rotated about the
-   vertical (`up_axis`, Y here) so the pelvis left→right axis points in a fixed
-   direction — removing heading. **Pitch and roll are left intact** (trunk lean,
-   head orientation) because those carry posture/emotion; only the horizontal
-   heading is normalized away.
-3. **Speed channel** (`keep_speed`, default on). The per-frame body speed —
-   the pelvis-centroid displacement magnitude in **world** coordinates, computed
-   *before* centring (centring would zero it) — is appended as a trailing
-   column. So a stored sequence is `(T, 41*3 + 1)`: 123 pose columns then 1
-   speed column.
+1. **骨盤中心ローカル座標**。各フレームを、骨盤 4 マーカー（`LFWT/RFWT/LBWT/RBWT`）の重心が
+   原点に来るよう平行移動 — 絶対歩行位置と部屋を横切る緩やかなドリフトを除去する。マーカーは
+   被験者ごとの接頭辞（`NABA_LFWT`）を持ち、最後の `_` 以降の素のトークンで照合する。重心は
+   NaN 耐性なので、オクルージョンされた骨盤マーカーが汚染しない。骨盤マーカーが*1つも無い*
+   フレームは落とさず未平行移動のままにする。
+2. **yaw 補正**（`yaw_align`、既定 ON）。各フレームを鉛直軸（`up_axis`、ここでは Y）まわりに
+   回転させ、骨盤の左→右軸が固定方向を向くようにする — 向き（heading）を除去。**pitch と roll
+   はそのまま残す**（体幹の傾き・頭部の向き）。これらは姿勢/感情を担うため。水平の向きだけを
+   正規化で消す。
+3. **速度チャネル**（`keep_speed`、既定 ON）。フレームごとの体の速度 — **ワールド**座標での
+   骨盤重心の変位の大きさ（中心化*前*に計算。中心化すると 0 になる）— を末尾列として付加。
+   よって格納される系列は `(T, 41*3 + 1)`: 123 の姿勢列の後に 1 の速度列。
 
-All four behaviours are `DataConfig` fields (`normalize`, `pelvis_markers`,
-`yaw_align`, `keep_speed`, `up_axis`), so the policy is config-driven and
-recorded in the resolved config. With `normalize=False` the raw flattened
-`(T, 41*3)` world coordinates are stored unchanged (used by the synthetic
-dataset tests, which have no pelvis markers). `sequences.npz` records the column
-split via `feature_layout` (`"pose_local_yaw+speed"`), `has_speed_channel` and
-`n_markers`, so consumers split pose vs. speed by metadata rather than guessing.
+4 つの挙動はすべて `DataConfig` のフィールド（`normalize`・`pelvis_markers`・`yaw_align`・
+`keep_speed`・`up_axis`）であり、ポリシーは config 駆動で解決済み config に記録される。
+`normalize=False` なら生の flatten された `(T, 41*3)` ワールド座標がそのまま格納される
+（骨盤マーカーを持たない合成データセットのテストで使用）。`sequences.npz` は列の分割を
+`feature_layout`（`"pose_local_yaw+speed"`）・`has_speed_channel`・`n_markers` で記録するので、
+消費側は姿勢 vs 速度を推測ではなくメタデータで分割できる。
 
-## Run directory (reproducibility contract)
+## run ディレクトリ（再現性の契約）
 
-A checkpoint is never saved without the exact config that produced it beside it:
+チェックポイントは、それを生成した正確な config を隣に置かずに保存されることはない:
 
 ```
 outputs/rf_a1b2c3d4/
-  config.yaml        # resolved ExperimentConfig
-  metadata.json      # git commit, seed, data hashes, timestamp, metrics summary
-  model.joblib       # (A) or model.pt (B)
-  metrics.json       # accuracy, per-class F1, confusion matrix
+  config.yaml        # 解決済み ExperimentConfig
+  metadata.json      # git commit, seed, データハッシュ, タイムスタンプ, 指標サマリ
+  model.joblib       # (A) または model.pt (B)
+  metrics.json       # accuracy, per-class F1, 混同行列
   predictions.parquet
 ```
 
-The directory name embeds `sha256(resolved config)[:8]`, so an identical config
-re-uses the same directory and re-running a configuration is detectable.
+ディレクトリ名は `sha256(解決済み config)[:8]` を埋め込むので、同一 config は同じ
+ディレクトリを再利用し、設定の再実行が検出可能になる。
 
-## Config management
+## config 管理
 
-Plain YAML validated by Pydantic v2 (`config.py`). Chosen over Hydra because the
-project is small and doesn't need config-group composition or a CLI takeover —
-Pydantic adds schema validation (typos in YAML fail loudly via `extra="forbid"`)
-and clean (de)serialization for the run-dir dump. Revisit Hydra only if sweep
-running becomes painful.
+Pydantic v2 で検証する素の YAML（`config.py`）。Hydra ではなくこれを選んだのは、プロジェクトが
+小さく config グループ合成や CLI 乗っ取りを必要としないため — Pydantic はスキーマ検証
+（YAML のタイポは `extra="forbid"` で明示的に失敗）と run ディレクトリ書き出し用の綺麗な
+(逆)シリアライズを足す。スイープ実行が苦痛になったら Hydra を再検討する。
 
-## Avoiding data leakage (critical)
+## データリーク回避（重要）
 
-Random / frame-level splits put the same subject in both train and test and
-inflate accuracy. All splitting is **subject-grouped** (`GroupKFold` /
-`GroupShuffleSplit` / leave-one-subject-out via `splits.py`), and approach A and
-B use the **identical** split so the comparison is valid.
+ランダム / フレーム単位の分割は同じ被験者を train と test の両方に入れ、精度を水増しする。
+すべての分割は**被験者グループ単位**（`splits.py` の `GroupKFold` / `GroupShuffleSplit` /
+leave-one-subject-out）であり、手法A と B は**同一の**分割を使うので比較が妥当になる。
 
-## Comparison & report (Phase 7, #13)
+## 比較 & レポート（Phase 7, #13）
 
-The two approaches are compared **head-to-head on the same artifact contract** —
-every run, whichever team produced it, is an `outputs/<name>_<hash>/` dir with a
-`metrics.json`, so the comparison reads both through the same `evaluate_run`:
+2 つの手法は**同一の成果物契約の上で head-to-head 比較**される — どのチームが作った run でも
+`metrics.json` を持つ `outputs/<name>_<hash>/` ディレクトリなので、比較は両方を同じ
+`evaluate_run` で読む:
 
-- **`evaluate.compare_runs(A, B)`** — A (expert features) vs B (NN) on the *same*
-  LOSO split and metrics; it refuses runs with a different label space or split
-  protocol, so a comparison can't silently mix incomparable runs.
-- **`evaluate.compare_protocols(intra, loso)`** — one approach's intra-subject vs
-  inter-subject(LOSO) Macro-F1, surfacing the **gap = subject dependence** (intra
-  is directly comparable to Venture 2014's >90%; LOSO is the real task).
-- **`viz.py`** — the figures: latent PCA (emotion=colour, subject=marker),
-  confusion-matrix heatmaps, A-vs-B metric bars. matplotlib is imported lazily
-  and gated behind the optional `viz` extra (`uv sync --extra viz`), so the core
-  eval surface never needs it.
+- **`evaluate.compare_runs(A, B)`** — A（expert features）vs B（NN）を*同一*の LOSO 分割・
+  指標で比較。ラベル空間や分割プロトコルが異なる run は拒否するので、比較が黙って非互換な
+  run を混ぜることはない。
+- **`evaluate.compare_protocols(intra, loso)`** — 1 手法の intra-subject vs
+  inter-subject(LOSO) Macro-F1 を出し、**ギャップ = 被験者依存性**を浮かび上がらせる（intra は
+  Venture 2014 の >90% と直接比較可能、LOSO が本番タスク）。
+- **`viz.py`** — 図: latent PCA（感情=色・被験者=マーカー）、混同行列ヒートマップ、A vs B 指標
+  棒グラフ。matplotlib は遅延 import され、任意の `viz` extra（`uv sync --extra viz`）の背後に
+  あるので、コアの評価面はこれを必要としない。
 
-**`expr-report`** (`cli/report.py`) is the thin driver that wires runs to the
-whole bundle in one reproducible command — no notebook:
+**`expr-report`**（`cli/report.py`）は run を一括成果物に繋ぐ薄いドライバで、1 つの再現可能な
+コマンドで動く — notebook なし:
 
 ```
 expr-report --run-a outputs/<rf> --run-b outputs/<cnn1d> \
@@ -263,66 +240,62 @@ expr-report --run-a outputs/<rf> --run-b outputs/<cnn1d> \
   → outputs/report/{comparison.md, protocol_comparison.md, figs/*.png}
 ```
 
-On the latent source: the per-fold held-out models are not persisted (only the
-final all-data model is), so the PCA encodes every window with that saved model —
-it is a *visualisation* of the learned latent, while the held-out separability
-**numbers** in `metrics.json` remain the honest generalisation signal; the two
-are read together.
+latent の出所について: fold ごとの held-out モデルは永続化されない（保存されるのは全データの
+最終モデルのみ）ため、PCA はその保存済みモデルで全 window を encode する — これは学習済み
+latent の*可視化*であり、`metrics.json` の held-out 分離度**数値**が正直な汎化シグナルとして
+残る。両者は併せて読む。
 
-## Early stopping (optional, Phase 8, #1)
+## early stopping（任意, Phase 8, #1）
 
-By default every NN trains for a flat `model.params.epochs` with **no validation
-set** — that is the baseline path and stays untouched. Adding a `validation`
-block to an experiment YAML (`ValidationConfig`) turns on **early stopping**:
+既定では各 NN は **validation set 無し**で固定 `model.params.epochs` だけ学習する — これが
+ベースライン経路で、手を加えない。実験 YAML に `validation` ブロック（`ValidationConfig`）を
+足すと **early stopping** が有効になる:
 
 ```yaml
 validation:
   enabled: true
-  strategy: group_subject   # hold out a whole subject from the train side
-  val_size: 0.34            # ~1 of 3 LOSO-train subjects
+  strategy: group_subject   # train 側から被験者を丸ごと 1 人 hold out
+  val_size: 0.34            # LOSO-train の 3 人中 ~1 人
   patience: 10
-  monitor: macro_f1         # accuracy | loss also supported
+  monitor: macro_f1         # accuracy | loss もサポート
   restore_best: true
 ```
 
-For each fold, the harness carves a **validation set out of that fold's train
-side** (`splits.nested_validation_split`), trains the NN with the validation
-metric watched each epoch, and keeps the weights from the best epoch. With
-`strategy: group_subject` (default) the validation set is a **whole held-out
-subject** — so, like the test fold, the early-stopping signal comes from an
-*unseen person* and model selection stays honest with respect to the
-inter-subject task (no same-subject leakage into the stopping criterion).
-`stratified_clip` is the looser seen-person alternative, kept for comparison.
+各 fold で、harness は**その fold の train 側から validation set を切り出し**
+（`splits.nested_validation_split`）、毎エポック validation 指標を見ながら NN を学習し、最良
+エポックの重みを保持する。`strategy: group_subject`（既定）では validation set は**丸ごと
+hold out された 1 被験者**なので、test fold と同様に early stopping のシグナルが*未知の人*から
+来て、inter-subject タスクに対してモデル選択が正直に保たれる（停止基準への同一被験者リーク
+なし）。`stratified_clip` は緩い「既知の人」版で、比較用に残してある。
 
-Key boundaries:
+重要な境界:
 
-- **NN-only.** Classic ML (RandomForest/SVM) has no epochs; the harness ignores
-  the block and trains normally, recording that ES did not apply.
-- **The saved artifact is unaffected.** Early stopping shapes the *per-fold*
-  models that produce the reported held-out metrics. The distributed checkpoint
-  (`model.joblib`) is still refit on **all** data for a fixed epoch count.
-- **Self-describing runs.** `metrics.json` gains an `early_stopping` block (mean
-  epochs run, monitor, folds used) and each fold a `validation` entry naming the
-  held-out validation subject.
+- **NN のみ**。古典ML（RandomForest/SVM）にはエポックが無いので、harness はこのブロックを
+  無視して通常通り学習し、ES が適用されなかったことを記録する。
+- **保存される成果物は影響を受けない**。early stopping は報告される held-out 指標を生む
+  *fold ごと*のモデルを形作る。配布チェックポイント（`model.joblib`）は依然として全データで
+  固定エポック数 refit される。
+- **自己記述的な run**。`metrics.json` に `early_stopping` ブロック（平均実行エポック数・
+  monitor・使用 fold）が加わり、各 fold には hold out した validation 被験者を示す
+  `validation` エントリが入る。
 
-This runs *parallel to* the fixed-epochs path so the two are directly
-comparable: `experiment_cnn1d.yaml` (fixed 40 epochs) vs
-`experiment_cnn1d_es.yaml` (early stopping). Results: see `docs/RESULTS.md`.
+これは固定エポック経路と*並行して*動くので、両者は直接比較できる: `experiment_cnn1d.yaml`
+（固定 40 エポック）vs `experiment_cnn1d_es.yaml`（early stopping）。結果は `docs/RESULTS.md`。
 
-## Anti-patterns this layout avoids
+## この構成が避けるアンチパターン
 
-- God scripts — logic stays in `src/`, scripts are thin.
-- Hardcoded paths/params — everything in `configs/`.
-- Notebook-driven non-reproducibility — there are no notebooks; comparison and
-  visualization run through `expr-report` (`cli/report.py` over `evaluate.py` +
-  `viz.py`), so every figure regenerates from a committed script.
-- Recomputing processed data every run — processed artifacts are persisted.
-- Subject leakage — grouped splits, shared across approaches.
-- Unpinned environment — `uv.lock` is committed.
+- 神スクリプト — ロジックは `src/` に、スクリプトは薄く。
+- ハードコードされたパス/パラメータ — すべて `configs/` に。
+- notebook 駆動の非再現性 — notebook は存在しない。比較と可視化は `expr-report`
+  （`cli/report.py` が `evaluate.py` + `viz.py` を呼ぶ）を通すので、全図がコミット済み
+  スクリプトから再生成される。
+- 毎 run で処理済みデータを再計算 — 処理済み成果物は永続化される。
+- 被験者リーク — グループ分割、手法間で共有。
+- 固定されていない環境 — `uv.lock` をコミット済み。
 
-## Status
+## ステータス
 
-Implemented in this PR: `config.py`, `run.py`, `models/base.py`,
-`models/registry.py`, model/CLI skeletons, config YAMLs, tests for the above.
-The remaining modules raise `NotImplementedError` and are filled in by the phase
-issues linked from #1.
+データ取り込み（parse / build-dataset）・不変化前処理・窓化と分割・古典ML と NN マルチタスク
+モデル・共通評価コード・比較/レポート/可視化・任意の early stopping まで実装済み（Phase 1〜8）。
+残りは手法A の本物の expert features（#20 / Phase 9）とチーム間最終比較（#21 / Phase 10）で、
+進捗は #1 のロードマップを参照。
