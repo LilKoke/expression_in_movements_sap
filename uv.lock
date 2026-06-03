@@ -478,6 +478,11 @@ dependencies = [
     { name = "torch" },
 ]
 
+[package.optional-dependencies]
+viz = [
+    { name = "matplotlib" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "jupyter" },
@@ -488,6 +493,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.9" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "pyarrow", specifier = ">=16.0" },
@@ -497,6 +503,7 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.13" },
     { name = "torch", specifier = ">=2.3" },
 ]
+provides-extras = ["viz"]
 
 [package.metadata.requires-dev]
 dev = [

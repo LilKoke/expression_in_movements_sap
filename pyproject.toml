@@ -15,6 +15,14 @@ dependencies = [
     "torch>=2.3",
 ]
 
+[project.optional-dependencies]
+# Phase 7 figures (latent PCA, confusion / comparison charts). Imported lazily in
+# expr_movements.viz, so the core eval surface works without it; install with
+# `uv sync --extra viz` to render.
+viz = [
+    "matplotlib>=3.9",
+]
+
 [project.scripts]
 # Thin CLI entry points; all logic lives in src/expr_movements.
 expr-parse = "expr_movements.cli.parse_trc:main"
@@ -41,6 +49,11 @@ packages = ["src/expr_movements"]
 [tool.ruff]
 line-length = 100
 target-version = "py313"
+
+[tool.ruff.lint.per-file-ignores]
+# matplotlib is an optional extra; test_viz gates the whole module on it via
+# pytest.importorskip, which must run before the viz imports it guards (E402).
+"tests/test_viz.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
