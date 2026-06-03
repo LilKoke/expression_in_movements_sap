@@ -51,7 +51,75 @@ from expr_movements.data.windows import (
 from expr_movements.models.base import BaseClassifier
 from expr_movements.models.registry import build_model
 from expr_movements.run import create_run_dir, write_metadata
-from expr_movements.splits import iter_splits
+from expr_movements.splits import iter_splits, nested_validation_split
+
+
+def _is_nn(model: BaseClassifier) -> bool:
+    """True for window-consuming NN models — the only ones that support early stop."""
+    return getattr(model, "consumes", "table") == "window"
+
+
+def _fit_fold(
+    model: BaseClassifier,
+    ds: SequenceDataset,
+    train_idx: np.ndarray,
+    train_ws: WindowSet,
+    mean: np.ndarray,
+    std: np.ndarray,
+    cfg: ExperimentConfig,
+    length: int,
+    stride: int,
+) -> dict | None:
+    """Fit ``model`` on a fold, with early stopping when enabled for an NN.
+
+    Returns ``None`` for the plain fixed-epochs path, or an info dict
+    (validation strategy, held-out subjects, best score, epochs run) when early
+    stopping was actually used. Early stopping is skipped — silently, falling
+    back to fixed epochs — for classic ML, or when the nested split is
+    impossible for this fold (e.g. a single train subject); the reason is
+    returned in the dict's ``note`` so the run records why.
+    """
+    if not (cfg.validation.enabled and _is_nn(model)):
+        if cfg.validation.enabled and not _is_nn(model):
+            # Classic ML has no epochs; ES does not apply. Record it once via return.
+            model.fit(_model_X(model, train_ws), train_ws.y)
+            return {"used": False, "note": "early stopping is NN-only; classic ML trained normally"}
+        model.fit(_model_X(model, train_ws), train_ws.y)
+        return None
+
+    # Carve a validation set out of this fold's train side (clip-level), window
+    # it with the SAME scaler, and early-stop on it.
+    try:
+        fit_pos, val_pos = nested_validation_split(
+            ds.subjects[train_idx], ds.labels[train_idx], cfg.validation
+        )
+    except ValueError as e:
+        model.fit(_model_X(model, train_ws), train_ws.y)
+        return {"used": False, "note": f"fell back to fixed epochs: {e}"}
+
+    fit_clip_idx = train_idx[fit_pos]
+    val_clip_idx = train_idx[val_pos]
+    fit_ws = apply_scaler(make_windows(ds, fit_clip_idx, length, stride), mean, std)
+    val_ws = apply_scaler(make_windows(ds, val_clip_idx, length, stride), mean, std)
+
+    model.fit(
+        _model_X(model, fit_ws),
+        fit_ws.y,
+        validation_data=(_model_X(model, val_ws), val_ws.y),
+        patience=cfg.validation.patience,
+        monitor=cfg.validation.monitor,
+        min_delta=cfg.validation.min_delta,
+        restore_best=cfg.validation.restore_best,
+    )
+    return {
+        "used": True,
+        "strategy": cfg.validation.strategy,
+        "monitor": cfg.validation.monitor,
+        "val_subjects": sorted(set(str(ds.subjects[c]) for c in val_clip_idx)),
+        "n_val_clips": int(len(val_clip_idx)),
+        "best_score": getattr(model, "best_score_", None),
+        "epochs_run": getattr(model, "stopped_epoch_", None),
+    }
 
 
 def _model_X(model: BaseClassifier, ws: WindowSet):
@@ -267,7 +335,7 @@ def run_training(cfg: ExperimentConfig, outputs_root: str | Path = "outputs") ->
         test_ws = apply_scaler(test_ws, mean, std)
 
         model = build_model(cfg.model.name, **cfg.model.params)
-        model.fit(_model_X(model, train_ws), train_ws.y)
+        val_info = _fit_fold(model, ds, train_idx, train_ws, mean, std, cfg, length, stride)
         win_pred = np.asarray(model.predict(_model_X(model, test_ws)), dtype=object)
 
         clip_ids, clip_pred = _majority_vote(win_pred, test_ws.clip_idx)
@@ -288,6 +356,8 @@ def run_training(cfg: ExperimentConfig, outputs_root: str | Path = "outputs") ->
         sep = _latent_separability(model, test_ws)
         if sep is not None:
             fold_score["separability"] = sep
+        if val_info is not None:
+            fold_score["validation"] = val_info
         fold_scores.append(fold_score)
         for ci, pred in zip(clip_ids, clip_pred):
             all_rows.append(
@@ -323,6 +393,17 @@ def run_training(cfg: ExperimentConfig, outputs_root: str | Path = "outputs") ->
     sep_agg = _aggregate_separability(fold_scores)
     if sep_agg is not None:
         metrics["separability"] = sep_agg
+    if cfg.validation.enabled:
+        used = [f["validation"] for f in fold_scores if f.get("validation", {}).get("used")]
+        epochs_run = [v["epochs_run"] for v in used if v.get("epochs_run") is not None]
+        metrics["early_stopping"] = {
+            "enabled": True,
+            "strategy": cfg.validation.strategy,
+            "monitor": cfg.validation.monitor,
+            "patience": cfg.validation.patience,
+            "folds_used": len(used),
+            "epochs_run": _mean_std(epochs_run),
+        }
 
     run_dir = create_run_dir(cfg, outputs_root=outputs_root)
     joblib.dump(
@@ -340,6 +421,7 @@ def run_training(cfg: ExperimentConfig, outputs_root: str | Path = "outputs") ->
             "config_name": cfg.name,
             "model": cfg.model.name,
             "split_strategy": cfg.split.strategy,
+            "early_stopping": cfg.validation.enabled,
             "window": {"length": length, "stride": stride},
             "n_clips": len(ds),
             "n_folds": len(fold_scores),

@@ -1,0 +1,58 @@
+# Approach B (headline) with EARLY STOPPING + regularisation (Phase 8, #1).
+# This is the "accuracy-recovery" recipe found by the Phase 8 sweep: naive early
+# stopping ALONE hurts LOSO (train shrinks 3->2 subjects), and each regulariser
+# alone also hurts — only the COMBINATION beats the fixed-epochs baseline
+# (clip Acc 0.630 -> 0.675, Macro-F1 0.555 -> 0.606 on this data).
+#
+# Differences vs experiment_cnn1d.yaml (fixed 40 epochs):
+#   - validation block enables early stopping on a WHOLE held-out subject
+#     (group_subject) — the stop signal comes from an unseen person, like test.
+#   - epochs raised to a high cap; early stopping decides the real stop.
+#   - smaller capacity (latent 32->16, hidden 64->32) + stronger dropout (0.4)
+#     + weight_decay (1e-3) + BatchNorm in the classifier head.
+# Compare head-to-head against experiment_cnn1d.yaml.
+name: cnn1d_es
+seed: 42
+
+data:
+  raw_dir: data/raw
+  interim_dir: data/interim
+  processed_dir: data/processed
+  trim_start_frames: 0
+  trim_end_frames: 0
+
+window:
+  length: 64
+  stride: 16
+
+split:
+  strategy: leave_one_subject_out
+  n_splits: 4
+  seed: 42
+
+validation:               # Phase 8: early stopping on an unseen-subject val set
+  enabled: true
+  strategy: group_subject # hold out 1 whole subject from the 3 train subjects
+  val_size: 0.34          # ~1 of 3 train subjects
+  patience: 30            # generous; tiny dataset needs room before stopping
+  monitor: macro_f1       # higher is better
+  min_delta: 0.0
+  restore_best: true
+  seed: 42
+
+model:
+  name: cnn1d
+  params:
+    encoder: cnn1d
+    latent_dim: 16        # reduced capacity (was 32) -> less overfit on ~80 trials
+    hidden_size: 32       # reduced (was 64)
+    kernel_size: 5
+    dropout: 0.4          # stronger (was 0.2)
+    head_batchnorm: true  # BatchNorm in the classifier head
+    weight_decay: 0.001   # L2 regularisation
+    alpha: 1.0
+    beta: 1.0
+    lr: 0.001
+    epochs: 300           # high cap; early stopping decides the real stop
+    batch_size: 32
+    random_state: 42

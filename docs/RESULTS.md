@@ -116,6 +116,69 @@ classic ML（rf）には該当指標なし。
 → Phase 7 では、この LOSO 数字で **NN系 vs expert features系** を head-to-head 比較し、
 精度（RF 優位）と解釈性・latent 可視化（CNN 優位）のトレードオフを言語化する。
 
+## Phase 8: early stopping + validation-best モデル
+
+固定 epochs（baseline, validation なし）に対し、各 LOSO fold の train 側から
+**未知の1被験者を validation に切り出して early stopping**（best epoch の重みを復元）
+する経路を追加し、同一 LOSO で head-to-head 比較した。validation 分割は
+`group_subject`（早期停止シグナルも未知の人＝test と同性質、被験者リークなし）。
+
+### 素朴な early stopping は単独では精度を下げる
+
+最初に「ES だけ（正則化なし）」を試すと **LOSO 精度が悪化**した：
+
+| 構成 | clip Acc | clip Macro-F1 |
+|---|---|---|
+| cnn1d 固定40（baseline） | 0.630 ± 0.241 | 0.555 ± 0.287 |
+| cnn1d ES のみ（patience30） | 0.542 ± 0.232 | 0.468 ± 0.281 |
+
+理由は明快で、**被験者が4人しかいない**ため validation に1人取ると **train が3人→2人**に
+減り、モデルが弱くなる損失が ES の恩恵を上回る。
+
+### 改善: 容量削減 + 正則化 + head BatchNorm を組み合わせて baseline 超え
+
+@LilKoke 提案（パラメータ数・patience・batch normalization）を受けてスイープした。
+**単独施策はどれも baseline 以下**（容量減のみ 0.613 / head BN のみ 0.592 /
+weight_decay+dropout のみ 0.567）。**全部を組み合わせて初めて baseline を超えた**：
+
+| 構成 (cnn1d) | clip Acc | clip Macro-F1 | epochs |
+|---|---|---|---|
+| 固定40（baseline） | 0.630 ± 0.241 | 0.555 ± 0.287 | 40 |
+| **ES + reg combo** | **0.675 ± 0.297** | **0.606 ± 0.363** | 69 ± 12 |
+
+reg combo = latent 32→16 / hidden 64→32 / dropout 0.2→0.4 / weight_decay 1e-3 /
+head BatchNorm / patience 30。config: `experiment_cnn1d_es.yaml`。
+
+被験者別（cnn1d）: 固定 `{EMLA .90, NABA .75, PAIB .62, SALE .25}` →
+ES+reg `{EMLA .90, NABA .55, PAIB 1.00, SALE .25}`。PAIB が大きく改善する一方
+NABA は低下、SALE は両者とも 0.25 のまま（最難被験者）。std はむしろ拡大しており、
+**4被験者の少データでは依然不安定**。
+
+### 同じレシピは LSTM には効かない（転移しない）
+
+CNN で当たったレシピを LSTM にそのまま適用すると**悪化**した：
+
+| 構成 (lstm) | clip Acc | clip Macro-F1 |
+|---|---|---|
+| 固定40（baseline） | 0.601 ± 0.270 | 0.548 ± 0.319 |
+| ES + reg combo（CNN と同設定） | 0.417 ± 0.177 | 0.316 ± 0.222 |
+
+→ ハイパラはアーキ依存で、LSTM には別途チューニングが必要。**「ES を入れれば必ず上がる」
+わけではない**ことの実証でもある。
+
+### 含意
+
+- early stopping は**それ単体では本データ（4被験者）でむしろ不利**。validation 用に
+  被験者を取られる損失が大きい。
+- **強い正則化 + 容量削減と組み合わせると CNN では baseline を上回る**（0.630→0.675）が、
+  std は大きく、効果はアーキ・ハイパラに敏感。
+- 既存の固定 epochs パスは baseline として残してあり（後方互換）、ES は opt-in。
+  最終配布モデル（`model.joblib`）は両経路とも全データ固定 epoch で refit され不変。
+
+> 注: ES 経路の詳細指標（per-fold validation 被験者・停止 epoch 等）は各 run の
+> `metrics.json` の `early_stopping` / 各 fold の `validation`、または
+> `expr-evaluate --run <dir>` の "Early stopping" 節で確認できる。
+
 ## 付録: この結果を生成した run
 
 | run dir | config | プロトコル |
@@ -126,6 +189,8 @@ classic ML（rf）には該当指標なし。
 | `outputs/rf_intra_47958e45/`  | `experiment_rf_intra.yaml`    | intra |
 | `outputs/cnn1d_intra_f52b073c/` | `experiment_cnn1d_intra.yaml` | intra |
 | `outputs/lstm_intra_78d027f8/` | `experiment_lstm_intra.yaml`  | intra |
+| `outputs/cnn1d_es_*/`         | `experiment_cnn1d_es.yaml`    | LOSO + early stopping |
+| `outputs/lstm_es_*/`          | `experiment_lstm_es.yaml`     | LOSO + early stopping |
 
 （run dir 名のハッシュは config 内容に依存。再学習で同一 config なら同じハッシュになる。
 metrics の全数値は各 run の `metrics.json`、または `expr-evaluate --run <dir> --json` で参照。）

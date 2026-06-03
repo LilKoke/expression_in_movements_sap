@@ -88,6 +88,66 @@ def test_run_training_writes_full_run_dir(tmp_path):
     assert sorted(bundle["labels"]) == ["calm", "excited"]
 
 
+def test_early_stopping_path_runs_and_records(tmp_path):
+    """An NN run with validation.enabled early-stops per LOSO fold and records it.
+
+    The metrics carry an ``early_stopping`` block and each fold a ``validation``
+    entry naming the held-out validation subject (an unseen person, disjoint from
+    the test subject). The split protocol/folds are otherwise unchanged.
+    """
+    from expr_movements.config import ValidationConfig
+
+    processed = tmp_path / "processed"
+    processed.mkdir()
+    _write_synthetic_npz(processed / "sequences.npz")
+
+    cfg = ExperimentConfig(
+        name="cnn1d_es_test",
+        data={"processed_dir": str(processed)},
+        window=WindowConfig(length=20, stride=10),
+        split=SplitConfig(strategy="leave_one_subject_out", n_splits=4),
+        validation=ValidationConfig(
+            enabled=True, strategy="group_subject", val_size=0.34, patience=3, monitor="macro_f1"
+        ),
+        model=ModelConfig(
+            name="cnn1d", params={"epochs": 50, "latent_dim": 8, "hidden_size": 16, "batch_size": 16}
+        ),
+    )
+    run_dir = run_training(cfg, outputs_root=tmp_path / "outputs")
+    metrics = json.loads((run_dir / "metrics.json").read_text())
+
+    assert "early_stopping" in metrics
+    assert metrics["early_stopping"]["enabled"] is True
+    assert metrics["early_stopping"]["folds_used"] >= 1
+
+    # Each fold records its validation subject, disjoint from the test subject.
+    for fold in metrics["folds"]:
+        v = fold.get("validation")
+        assert v is not None and v["used"] is True
+        assert set(v["val_subjects"]).isdisjoint(set(fold["test_subjects"]))
+
+    meta = json.loads((run_dir / "metadata.json").read_text())
+    assert meta["early_stopping"] is True
+
+
+def test_early_stopping_ignored_for_classic_ml(tmp_path):
+    """validation.enabled is a no-op for RandomForest (no epochs); it still runs."""
+    from expr_movements.config import ValidationConfig
+
+    processed = tmp_path / "processed"
+    processed.mkdir()
+    _write_synthetic_npz(processed / "sequences.npz")
+
+    cfg = _make_cfg(processed)
+    cfg = cfg.model_copy(update={"validation": ValidationConfig(enabled=True)})
+    run_dir = run_training(cfg, outputs_root=tmp_path / "outputs")
+    metrics = json.loads((run_dir / "metrics.json").read_text())
+    # The run completes; folds note that ES did not apply to classic ML.
+    assert metrics["folds"]
+    for fold in metrics["folds"]:
+        assert fold["validation"]["used"] is False
+
+
 def test_intra_subject_protocol_runs(tmp_path):
     processed = tmp_path / "processed"
     processed.mkdir()

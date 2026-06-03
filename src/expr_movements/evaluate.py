@@ -111,6 +111,8 @@ def evaluate_run(run_dir: str | Path) -> dict:
         summary["reconstruction"] = metrics["reconstruction"]
     if "separability" in metrics:
         summary["separability"] = metrics["separability"]
+    if "early_stopping" in metrics:
+        summary["early_stopping"] = metrics["early_stopping"]
     return summary
 
 
@@ -168,6 +170,19 @@ def format_report(summary: dict) -> str:
             lines.append(
                 f"- Davies-Bouldin (lower=better): {s['davies_bouldin']['mean']:.4f} ± {s['davies_bouldin']['std']:.4f}"
             )
+        lines.append("")
+
+    if "early_stopping" in summary:
+        es = summary["early_stopping"]
+        lines.append("## Early stopping")
+        lines.append(
+            f"- Validation: **{es.get('strategy')}** split, monitor=`{es.get('monitor')}`, "
+            f"patience={es.get('patience')}"
+        )
+        lines.append(f"- Folds using early stopping: {es.get('folds_used')}")
+        er = es.get("epochs_run")
+        if er:
+            lines.append(f"- Epochs run: {er['mean']:.1f} ± {er['std']:.1f}")
         lines.append("")
 
     return "\n".join(lines)

@@ -1,0 +1,48 @@
+# Approach B (LSTM baseline) with EARLY STOPPING (Phase 8, #1).
+# Identical to experiment_lstm.yaml except for the `validation` block and the
+# raised `epochs` cap. See experiment_cnn1d_es.yaml for the rationale; this is
+# the RNN counterpart so the CNN-vs-RNN comparison also covers the ES path.
+name: lstm_es
+seed: 42
+
+data:
+  raw_dir: data/raw
+  interim_dir: data/interim
+  processed_dir: data/processed
+  trim_start_frames: 0
+  trim_end_frames: 0
+
+window:
+  length: 64
+  stride: 16
+
+split:
+  strategy: leave_one_subject_out
+  n_splits: 4
+  seed: 42
+
+validation:
+  enabled: true
+  strategy: group_subject
+  val_size: 0.34
+  patience: 30
+  monitor: macro_f1
+  min_delta: 0.0
+  restore_best: true
+  seed: 42
+
+model:
+  name: lstm
+  params:
+    encoder: lstm
+    latent_dim: 16
+    hidden_size: 32
+    dropout: 0.4
+    head_batchnorm: true
+    weight_decay: 0.001
+    alpha: 1.0
+    beta: 1.0
+    lr: 0.001
+    epochs: 300
+    batch_size: 32
+    random_state: 42

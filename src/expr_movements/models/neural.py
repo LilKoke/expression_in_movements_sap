@@ -116,7 +116,10 @@ class _MultiTaskNet(nn.Module):
     over time.
     """
 
-    def __init__(self, n_features, length, n_classes, encoder, latent_dim, has_speed, hidden, dropout):
+    def __init__(
+        self, n_features, length, n_classes, encoder, latent_dim, has_speed, hidden, dropout,
+        head_batchnorm=False,
+    ):
         super().__init__()
         self.length = length
         self.n_features = n_features
@@ -124,12 +127,15 @@ class _MultiTaskNet(nn.Module):
         self.encoder = encoder
         z_dim = latent_dim + (1 if has_speed else 0)
         self.latent_dim = z_dim
-        self.head = nn.Sequential(
-            nn.Linear(z_dim, hidden),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden, n_classes),
-        )
+        # Classification head. With ``head_batchnorm`` a BatchNorm1d sits after the
+        # hidden Linear — on this small dataset it regularises and steadies the
+        # head's training (the CNN encoder already uses BN; this extends it to the
+        # classifier). Off by default to preserve the original architecture.
+        head_layers = [nn.Linear(z_dim, hidden)]
+        if head_batchnorm:
+            head_layers.append(nn.BatchNorm1d(hidden))
+        head_layers += [nn.ReLU(), nn.Dropout(dropout), nn.Linear(hidden, n_classes)]
+        self.head = nn.Sequential(*head_layers)
         # Decoder: z -> per-frame features. The latent is time-invariant, so the
         # same reconstructed frame is broadcast over T (the encoder pools time
         # away — what z keeps is the window-level pose summary).
@@ -212,6 +218,8 @@ class _MultiTaskBase(BaseClassifier):
         hidden_size: int = 64,
         kernel_size: int = 5,
         dropout: float = 0.2,
+        head_batchnorm: bool = False,  # BatchNorm in the classifier head
+        weight_decay: float = 0.0,  # L2 regularisation (Adam weight_decay)
         alpha: float = 1.0,  # reconstruction weight
         beta: float = 1.0,  # classification weight
         lr: float = 1e-3,
@@ -224,6 +232,8 @@ class _MultiTaskBase(BaseClassifier):
         self.hidden_size = hidden_size
         self.kernel_size = kernel_size
         self.dropout = dropout
+        self.head_batchnorm = head_batchnorm
+        self.weight_decay = weight_decay
         self.alpha = alpha
         self.beta = beta
         self.lr = lr
@@ -232,7 +242,30 @@ class _MultiTaskBase(BaseClassifier):
         self.random_state = random_state
 
     # -- training -------------------------------------------------------------
-    def fit(self, X, y) -> "_MultiTaskBase":
+    def fit(
+        self,
+        X,
+        y,
+        validation_data=None,
+        patience: int | None = None,
+        monitor: str = "macro_f1",
+        min_delta: float = 0.0,
+        restore_best: bool = True,
+    ) -> "_MultiTaskBase":
+        """Train the multi-task net for ``epochs``, optionally with early stopping.
+
+        Backward-compatible: called as ``fit(X, y)`` it trains a flat
+        ``self.epochs`` epochs exactly as before (no validation). When
+        ``validation_data=(X_val, y_val)`` and ``patience`` are given, after each
+        epoch the monitored metric is computed on the validation set; training
+        stops once it fails to improve by ``min_delta`` for ``patience`` epochs,
+        and (``restore_best``) the best-scoring epoch's weights are restored. The
+        number of epochs actually run and the best validation score are recorded
+        on ``self.stopped_epoch_`` / ``self.best_score_`` for the harness to log.
+
+        ``monitor``: ``macro_f1`` | ``accuracy`` (higher is better) | ``loss``
+        (the multi-task total, lower is better).
+        """
         from torch.utils.data import DataLoader, TensorDataset
 
         ws = _as_window_set(X)
@@ -264,9 +297,12 @@ class _MultiTaskBase(BaseClassifier):
             has_speed=self._has_speed,
             hidden=self.hidden_size,
             dropout=self.dropout,
+            head_batchnorm=self.head_batchnorm,
         )
 
-        opt = torch.optim.Adam(self.net_.parameters(), lr=self.lr)
+        opt = torch.optim.Adam(
+            self.net_.parameters(), lr=self.lr, weight_decay=self.weight_decay
+        )
         ce = nn.CrossEntropyLoss()
         mse = nn.MSELoss(reduction="none")
 
@@ -277,8 +313,27 @@ class _MultiTaskBase(BaseClassifier):
         )
         loader = DataLoader(ds, batch_size=self.batch_size, shuffle=True)
 
-        self.net_.train()
-        for _ in range(self.epochs):
+        # -- early-stopping bookkeeping (no-op when validation_data is None) ----
+        es_on = validation_data is not None and patience is not None
+        val_ws = y_val_idx = None
+        if es_on:
+            X_val, y_val = validation_data
+            val_ws = _as_window_set(X_val)
+            # Unseen labels in val map to -1 (ignored by accuracy/f1, never by
+            # the seen classes); keep them as strings for metric comparison.
+            y_val_idx = np.asarray([str(v) for v in np.asarray(y_val)], dtype=object)
+        higher_better = monitor in ("macro_f1", "accuracy")
+        best_score = -np.inf if higher_better else np.inf
+        best_state = None
+        best_epoch = -1
+        bad = 0
+        self.stopped_epoch_ = self.epochs
+        self.best_score_ = None
+
+        import copy
+
+        for epoch in range(self.epochs):
+            self.net_.train()
             for xb, mb, yb in loader:
                 opt.zero_grad()
                 logits, recon, _ = self.net_(xb, mb)
@@ -290,8 +345,76 @@ class _MultiTaskBase(BaseClassifier):
                 loss = self.alpha * rec_loss + self.beta * clf_loss
                 loss.backward()
                 opt.step()
+
+            if not es_on:
+                continue
+
+            score = self._validation_score(val_ws, y_val_idx, monitor, ce, mse)
+            improved = (
+                score > best_score + min_delta
+                if higher_better
+                else score < best_score - min_delta
+            )
+            if improved:
+                best_score = score
+                best_epoch = epoch
+                bad = 0
+                if restore_best:
+                    best_state = copy.deepcopy(self.net_.state_dict())
+            else:
+                bad += 1
+                if bad >= patience:
+                    self.stopped_epoch_ = epoch + 1
+                    break
+
+        if es_on:
+            self.best_score_ = float(best_score) if np.isfinite(best_score) else None
+            self.best_epoch_ = best_epoch
+            if restore_best and best_state is not None:
+                self.net_.load_state_dict(best_state)
         self.net_.eval()
         return self
+
+    def _validation_score(self, val_ws, y_val, monitor, ce, mse) -> float:
+        """Monitored metric on the validation set for one early-stopping check.
+
+        ``loss`` is the same multi-task total used in training (lower better);
+        ``accuracy`` / ``macro_f1`` are computed from the class predictions
+        (higher better). Runs under ``eval``/``no_grad`` so it never affects the
+        weights being trained.
+        """
+        from sklearn.metrics import accuracy_score, f1_score
+
+        self.net_.eval()
+        with torch.no_grad():
+            xb = torch.from_numpy(val_ws.X.astype(np.float32))
+            mb = torch.from_numpy(val_ws.mask.astype(np.float32))
+            logits, recon, _ = self.net_(xb, mb)
+            if monitor == "loss":
+                cls_to_idx = {c: i for i, c in enumerate(self.classes_)}
+                # Val labels unseen in train can't be scored as loss targets;
+                # restrict the loss to rows whose label the model knows.
+                keep = np.array([str(v) in cls_to_idx for v in y_val])
+                if not keep.any():
+                    return float("inf")
+                yb = torch.from_numpy(
+                    np.array([cls_to_idx[str(v)] for v in y_val[keep]], dtype=np.int64)
+                )
+                lk = logits[torch.from_numpy(np.where(keep)[0])]
+                rk = recon[torch.from_numpy(np.where(keep)[0])]
+                xk = xb[torch.from_numpy(np.where(keep)[0])]
+                mk = mb[torch.from_numpy(np.where(keep)[0])]
+                clf = ce(lk, yb)
+                per = mse(rk, xk).mean(dim=2)
+                rec = (per * mk).sum() / mk.sum().clamp_min(1.0)
+                return float(self.alpha * rec + self.beta * clf)
+            pred = self.classes_[logits.argmax(dim=1).cpu().numpy()]
+        y_true = y_val.astype(str)
+        pred = pred.astype(str)
+        if monitor == "accuracy":
+            return float(accuracy_score(y_true, pred))
+        labels = sorted(set(self.classes_.astype(str)))
+        return float(f1_score(y_true, pred, labels=labels, average="macro", zero_division=0))
 
     # -- inference ------------------------------------------------------------
     def _forward_numpy(self, X):
