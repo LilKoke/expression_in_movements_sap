@@ -22,10 +22,19 @@ def test_load_experiment_configs():
 
     lstm = load_experiment("configs/experiment_lstm.yaml")
     assert lstm.model.name == "lstm"
-    assert lstm.model.params["hidden_size"] == 128
+    assert lstm.model.params["encoder"] == "lstm"  # RNN-encoder multi-task variant
     # A and B must share the same windowing + folds for a fair comparison.
     assert lstm.split.strategy == rf.split.strategy
     assert lstm.window == rf.window
+
+    # The headline approach B is the 1D-CNN multi-task model (Phase 5, #14):
+    # encoder + reconstruction/classification loss weights, same folds as A.
+    cnn = load_experiment("configs/experiment_cnn1d.yaml")
+    assert cnn.model.name == "cnn1d"
+    assert cnn.model.params["encoder"] == "cnn1d"
+    assert {"alpha", "beta", "latent_dim"} <= set(cnn.model.params)
+    assert cnn.split.strategy == rf.split.strategy
+    assert cnn.window == rf.window
 
 
 def test_registry_has_both_approaches():

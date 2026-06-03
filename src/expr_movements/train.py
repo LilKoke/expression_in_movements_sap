@@ -35,14 +35,26 @@ from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 from expr_movements.config import ExperimentConfig
 from expr_movements.data.windows import (
     SequenceDataset,
+    WindowSet,
     apply_scaler,
     fit_scaler,
     flatten_windows,
     make_windows,
 )
+from expr_movements.models.base import BaseClassifier
 from expr_movements.models.registry import build_model
 from expr_movements.run import create_run_dir, write_metadata
 from expr_movements.splits import iter_splits
+
+
+def _model_X(model: BaseClassifier, ws: WindowSet):
+    """Hand each model the window representation it declares via ``consumes``.
+
+    Classic ML wants a flat ``(n, length*F)`` feature table; the NN keeps the
+    ``(n, length, F)`` shape (and the mask) and so takes the ``WindowSet`` whole.
+    This is the one place the shared harness forks on approach.
+    """
+    return ws if getattr(model, "consumes", "table") == "window" else flatten_windows(ws)
 
 
 def _git_commit() -> str | None:
@@ -127,8 +139,8 @@ def run_training(cfg: ExperimentConfig, outputs_root: str | Path = "outputs") ->
         test_ws = apply_scaler(test_ws, mean, std)
 
         model = build_model(cfg.model.name, **cfg.model.params)
-        model.fit(flatten_windows(train_ws), train_ws.y)
-        win_pred = np.asarray(model.predict(flatten_windows(test_ws)), dtype=object)
+        model.fit(_model_X(model, train_ws), train_ws.y)
+        win_pred = np.asarray(model.predict(_model_X(model, test_ws)), dtype=object)
 
         clip_ids, clip_pred = _majority_vote(win_pred, test_ws.clip_idx)
         clip_true = np.asarray([str(ds.labels[c]) for c in clip_ids], dtype=object)
@@ -160,7 +172,7 @@ def run_training(cfg: ExperimentConfig, outputs_root: str | Path = "outputs") ->
     mean, std = fit_scaler(full_ws)
     full_ws = apply_scaler(full_ws, mean, std)
     final_model = build_model(cfg.model.name, **cfg.model.params)
-    final_model.fit(flatten_windows(full_ws), full_ws.y)
+    final_model.fit(_model_X(final_model, full_ws), full_ws.y)
 
     metrics = {
         "labels": labels_sorted,
