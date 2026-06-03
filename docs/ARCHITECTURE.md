@@ -26,7 +26,8 @@ Emotion labels come from the 3-letter filename code: `TRE=sad`, `COE=angry`,
 **Further reading**: numeric results and the train-time differences between models
 are in [RESULTS.md](RESULTS.md); metric definitions (Macro-F1 vs F1, accuracy vs
 balanced accuracy) and what the current comparison actually measures are in
-[FAQ.md](FAQ.md).
+[FAQ.md](FAQ.md); the no-GPU / Google-Drive data setup for collaborators without
+the gitignored `data/` is in [DATA_SETUP.md](DATA_SETUP.md).
 
 ## Design principles
 

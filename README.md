@@ -24,6 +24,12 @@ uv run pytest    # run tests
 Place the original `.trc` files under `data/raw/` (the `data/` directory is
 gitignored).
 
+**Working without the raw data (e.g. the expert-features team, no GPU):** the
+processed dataset is distributed via Google Drive — clone, `uv sync`, then unzip
+`expr-data-processed.zip` at the repo root. Step-by-step in
+[docs/DATA_SETUP.md](docs/DATA_SETUP.md). GPU is not required; the NN weights
+under `outputs/` are not needed.
+
 ## Pipeline (CLIs)
 
 Each step is a thin entry point; all logic lives in `src/expr_movements/`.
