@@ -215,6 +215,46 @@ inflate accuracy. All splitting is **subject-grouped** (`GroupKFold` /
 `GroupShuffleSplit` / leave-one-subject-out via `splits.py`), and approach A and
 B use the **identical** split so the comparison is valid.
 
+## Early stopping (optional, Phase 8, #1)
+
+By default every NN trains for a flat `model.params.epochs` with **no validation
+set** — that is the baseline path and stays untouched. Adding a `validation`
+block to an experiment YAML (`ValidationConfig`) turns on **early stopping**:
+
+```yaml
+validation:
+  enabled: true
+  strategy: group_subject   # hold out a whole subject from the train side
+  val_size: 0.34            # ~1 of 3 LOSO-train subjects
+  patience: 10
+  monitor: macro_f1         # accuracy | loss also supported
+  restore_best: true
+```
+
+For each fold, the harness carves a **validation set out of that fold's train
+side** (`splits.nested_validation_split`), trains the NN with the validation
+metric watched each epoch, and keeps the weights from the best epoch. With
+`strategy: group_subject` (default) the validation set is a **whole held-out
+subject** — so, like the test fold, the early-stopping signal comes from an
+*unseen person* and model selection stays honest with respect to the
+inter-subject task (no same-subject leakage into the stopping criterion).
+`stratified_clip` is the looser seen-person alternative, kept for comparison.
+
+Key boundaries:
+
+- **NN-only.** Classic ML (RandomForest/SVM) has no epochs; the harness ignores
+  the block and trains normally, recording that ES did not apply.
+- **The saved artifact is unaffected.** Early stopping shapes the *per-fold*
+  models that produce the reported held-out metrics. The distributed checkpoint
+  (`model.joblib`) is still refit on **all** data for a fixed epoch count.
+- **Self-describing runs.** `metrics.json` gains an `early_stopping` block (mean
+  epochs run, monitor, folds used) and each fold a `validation` entry naming the
+  held-out validation subject.
+
+This runs *parallel to* the fixed-epochs path so the two are directly
+comparable: `experiment_cnn1d.yaml` (fixed 40 epochs) vs
+`experiment_cnn1d_es.yaml` (early stopping). Results: see `docs/RESULTS.md`.
+
 ## Anti-patterns this layout avoids
 
 - God scripts — logic stays in `src/`, scripts are thin.

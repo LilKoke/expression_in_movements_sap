@@ -103,6 +103,52 @@ class SplitConfig(_Strict):
     seed: int = 42
 
 
+class ValidationConfig(_Strict):
+    """Optional early-stopping with a held-out validation split (Phase 8, #1).
+
+    The fixed-epochs path (``enabled=False``, the default) trains every NN for a
+    flat ``model.params.epochs`` with no validation — that is the existing
+    behaviour and stays the baseline. With ``enabled=True`` the harness carves a
+    **validation set out of each fold's train side** and trains with early
+    stopping, keeping the weights from the epoch that scored best on validation.
+
+    Crucially the validation split is made on **whole subjects** (``group_subject``,
+    the default): inside a LOSO fold whose train side is 3 subjects, one more
+    subject is held out for validation, so the early-stopping signal — like the
+    test fold — comes from an *unseen person*. This keeps the model-selection
+    decision honest with respect to the inter-subject task (no same-subject
+    leakage into the stopping criterion). ``stratified_clip`` is the looser
+    alternative: split train *clips* (subjects mixed) so validation is a
+    seen-person set — recorded as an option for comparison, not the default.
+
+    Early stopping is **NN-only**; for classic ML (RandomForest/SVM, which have
+    no epochs) the harness ignores this block and trains normally. The final
+    saved artifact is always refit on all data for a fixed epoch count — early
+    stopping shapes the *per-fold* models that produce the reported metrics, not
+    the distributed checkpoint.
+    """
+
+    enabled: bool = False
+    # group_subject -> hold out a whole subject from train (unseen-person early
+    # stopping, default); stratified_clip -> split train clips with subjects
+    # mixed (seen-person validation).
+    strategy: str = "group_subject"
+    # Fraction of the train side reserved for validation. With group_subject the
+    # nearest whole-subject count is held out (>=1 subject); with stratified_clip
+    # it is the clip fraction.
+    val_size: float = Field(0.25, gt=0, lt=1)
+    # Epochs without validation improvement before stopping early.
+    patience: int = Field(8, ge=1)
+    # Metric watched on validation: macro_f1 (default) | accuracy | loss. For
+    # loss, lower is better; for the others, higher is better.
+    monitor: str = "macro_f1"
+    # Minimum change in the monitored metric to count as an improvement.
+    min_delta: float = Field(0.0, ge=0)
+    # Restore the best-scoring epoch's weights when stopping (vs keeping last).
+    restore_best: bool = True
+    seed: int = 42
+
+
 class WindowConfig(_Strict):
     """Fixed-length sliding window over each clip (Phase 4, #6).
 
@@ -140,6 +186,7 @@ class ExperimentConfig(_Strict):
     data: DataConfig = Field(default_factory=DataConfig)
     window: WindowConfig = Field(default_factory=WindowConfig)
     split: SplitConfig = Field(default_factory=SplitConfig)
+    validation: ValidationConfig = Field(default_factory=ValidationConfig)
     model: ModelConfig
 
 

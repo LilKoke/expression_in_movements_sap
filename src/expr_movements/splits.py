@@ -28,9 +28,15 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 
 import numpy as np
-from sklearn.model_selection import GroupKFold, GroupShuffleSplit, LeaveOneGroupOut, KFold
+from sklearn.model_selection import (
+    GroupKFold,
+    GroupShuffleSplit,
+    LeaveOneGroupOut,
+    KFold,
+    StratifiedShuffleSplit,
+)
 
-from expr_movements.config import SplitConfig
+from expr_movements.config import SplitConfig, ValidationConfig
 
 
 def iter_splits(
@@ -129,3 +135,70 @@ def _intra_subject_splits(
         train_idx = np.concatenate(tr_parts) if tr_parts else np.array([], dtype=int)
         test_idx = np.concatenate(te_parts)
         yield train_idx, test_idx
+
+
+def nested_validation_split(
+    subjects: np.ndarray,
+    y: np.ndarray,
+    cfg: ValidationConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Carve a validation set out of one fold's train side for early stopping.
+
+    ``subjects`` / ``y`` are the per-clip subject ids and labels of the **train
+    clips of a single fold** (the output of ``iter_splits``'s ``train_idx``).
+    Returns ``(fit_idx, val_idx)`` as positions *into those train arrays*, so the
+    caller maps them back through ``train_idx`` itself.
+
+    Two strategies (``cfg.strategy``):
+
+    * ``group_subject`` (default) — hold out whole subjects, so the early-stopping
+      signal comes from an *unseen person*, matching the inter-subject test
+      protocol (no same-subject leakage into model selection). The number of
+      held-out subjects is ``round(val_size * n_subjects)`` clamped to
+      ``[1, n_subjects - 1]``; their every clip goes to validation.
+    * ``stratified_clip`` — split *clips* with subjects mixed, stratified by label
+      so every emotion appears in validation. Validation is then a *seen-person*
+      set (looser, kept for comparison).
+
+    Raises ``ValueError`` if a split is impossible (e.g. ``group_subject`` with a
+    single train subject, or fewer clips than classes for stratification) — the
+    caller should fall back to fixed-epochs training for that fold.
+    """
+    subjects = np.asarray(subjects)
+    y = np.asarray(y)
+    n = len(subjects)
+    idx = np.arange(n)
+    if n < 2:
+        raise ValueError("need at least 2 train clips to carve a validation set")
+
+    if cfg.strategy == "group_subject":
+        uniq = np.unique(subjects)
+        if len(uniq) < 2:
+            raise ValueError(
+                "group_subject validation needs >=2 train subjects; "
+                "got 1 — fall back to fixed-epochs for this fold"
+            )
+        n_val = int(round(cfg.val_size * len(uniq)))
+        n_val = max(1, min(n_val, len(uniq) - 1))
+        rng = np.random.default_rng(cfg.seed)
+        val_subjects = set(rng.permutation(uniq)[:n_val].tolist())
+        val_mask = np.isin(subjects, list(val_subjects))
+        return idx[~val_mask], idx[val_mask]
+
+    if cfg.strategy == "stratified_clip":
+        n_classes = len(np.unique(y))
+        if n < 2 * n_classes:
+            raise ValueError(
+                f"stratified_clip validation needs >={2 * n_classes} train clips "
+                f"for {n_classes} classes; got {n}"
+            )
+        sss = StratifiedShuffleSplit(
+            n_splits=1, test_size=cfg.val_size, random_state=cfg.seed
+        )
+        fit_i, val_i = next(sss.split(idx.reshape(-1, 1), y))
+        return idx[fit_i], idx[val_i]
+
+    raise ValueError(
+        f"unknown validation strategy {cfg.strategy!r}; "
+        "expected group_subject | stratified_clip"
+    )

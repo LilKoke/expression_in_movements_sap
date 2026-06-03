@@ -91,6 +91,47 @@ def test_no_speed_channel_latent_dim():
     assert model.transform(ws).shape == (len(ws.X), latent_dim)
 
 
+def test_fit_early_stopping_stops_and_records(monkeypatch):
+    """fit(..., validation_data, patience) early-stops and records the stop epoch.
+
+    With a high epoch cap, a small patience, and a validation set, training must
+    stop before the cap and expose ``stopped_epoch_`` / ``best_score_``. The
+    restored model still predicts the learnable classes.
+    """
+    train = _learnable_windows(n_per_class=12, seed=0)
+    val = _learnable_windows(n_per_class=4, seed=1)
+    model = build_model("cnn1d", epochs=200, latent_dim=8, hidden_size=16, batch_size=8)
+    model.fit(
+        train, train.y,
+        validation_data=(val, val.y),
+        patience=3, monitor="macro_f1",
+    )
+    assert model.stopped_epoch_ <= 200  # early stop (or hit cap) was tracked
+    assert model.stopped_epoch_ < 200  # separable signal converges well before cap
+    assert model.best_score_ is not None
+    pred = model.predict(val)
+    assert set(pred) <= {"calm", "excited"}
+
+
+def test_fit_without_validation_runs_all_epochs():
+    """Backward compat: fit(X, y) with no validation runs the full epoch count."""
+    ws = _learnable_windows()
+    model = build_model("cnn1d", epochs=5, latent_dim=4, hidden_size=8, batch_size=8)
+    model.fit(ws, ws.y)
+    assert model.stopped_epoch_ == 5  # no early stopping -> ran all epochs
+    assert model.best_score_ is None  # no validation tracked
+
+
+def test_fit_early_stopping_monitor_loss():
+    """monitor='loss' is accepted (lower-is-better path) and trains/predicts."""
+    train = _learnable_windows(n_per_class=10, seed=0)
+    val = _learnable_windows(n_per_class=4, seed=2)
+    model = build_model("lstm", epochs=30, latent_dim=8, hidden_size=16, batch_size=8)
+    model.fit(train, train.y, validation_data=(val, val.y), patience=3, monitor="loss")
+    assert model.best_score_ is not None
+    assert model.predict(val).shape[0] == len(val.X)
+
+
 def test_alpha_beta_are_configurable():
     """Reconstruction/classification weights are plain hyperparameters on the model."""
     model = build_model("cnn1d", alpha=0.3, beta=2.0, epochs=1)

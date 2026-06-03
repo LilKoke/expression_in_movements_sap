@@ -10,8 +10,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from expr_movements.config import SplitConfig
-from expr_movements.splits import iter_splits
+from expr_movements.config import SplitConfig, ValidationConfig
+from expr_movements.splits import iter_splits, nested_validation_split
 
 SUBJECTS = np.array(["A"] * 5 + ["B"] * 5 + ["C"] * 5 + ["D"] * 5)
 LABELS = np.array((["sad", "angry", "neutral", "happy", "sad"]) * 4, dtype=object)
@@ -71,3 +71,49 @@ def test_unknown_strategy_raises():
     cfg = SplitConfig(strategy="nonsense")
     with pytest.raises(ValueError, match="unknown split strategy"):
         list(iter_splits(SUBJECTS, LABELS, cfg))
+
+
+# -- nested validation split (Phase 8, #1) ------------------------------------
+
+
+def test_nested_group_subject_holds_out_whole_subject():
+    """group_subject validation keeps a whole subject out of the fit set.
+
+    Simulates one LOSO fold: train side = 3 subjects (B, C, D). The validation
+    set must be 1 entire subject, disjoint from the fit subjects (unseen-person
+    early stopping), and the two index sets must partition the train clips.
+    """
+    train_subjects = np.array(["B"] * 5 + ["C"] * 5 + ["D"] * 5)
+    train_labels = LABELS[:15]
+    cfg = ValidationConfig(enabled=True, strategy="group_subject", val_size=0.34)
+    fit_pos, val_pos = nested_validation_split(train_subjects, train_labels, cfg)
+
+    fit_s, val_s = set(train_subjects[fit_pos]), set(train_subjects[val_pos])
+    assert len(val_s) == 1  # one whole subject is validation
+    assert val_s.isdisjoint(fit_s)  # unseen-person validation
+    # partition: every train clip is in exactly one side
+    assert sorted(np.concatenate([fit_pos, val_pos])) == list(range(len(train_subjects)))
+
+
+def test_nested_group_subject_single_subject_raises():
+    """A fold whose train side is one subject can't make a group validation set."""
+    cfg = ValidationConfig(enabled=True, strategy="group_subject")
+    with pytest.raises(ValueError, match=">=2 train subjects"):
+        nested_validation_split(np.array(["B"] * 6), LABELS[:6], cfg)
+
+
+def test_nested_stratified_clip_covers_all_classes():
+    """stratified_clip splits clips (subjects mixed), keeping every label in val."""
+    train_subjects = np.array(["B"] * 6 + ["C"] * 6)
+    train_labels = np.array((["sad", "angry", "neutral", "happy", "sad", "angry"]) * 2, dtype=object)
+    cfg = ValidationConfig(enabled=True, strategy="stratified_clip", val_size=0.5)
+    fit_pos, val_pos = nested_validation_split(train_subjects, train_labels, cfg)
+    assert set(np.concatenate([fit_pos, val_pos])) == set(range(len(train_subjects)))
+    # stratified -> validation contains more than one class
+    assert len(set(train_labels[val_pos])) >= 2
+
+
+def test_nested_unknown_strategy_raises():
+    cfg = ValidationConfig(enabled=True, strategy="bogus")
+    with pytest.raises(ValueError, match="unknown validation strategy"):
+        nested_validation_split(SUBJECTS, LABELS, cfg)
