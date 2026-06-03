@@ -91,6 +91,59 @@ data/processed/features.parquet        approach A input  ──┤
                               expr-evaluate --compare A B  (evaluate.py)
 ```
 
+## Dataset persistence (Phase 2, #4)
+
+`expr-build-dataset` (`data/dataset.py`) turns the parsed interim clips into two
+persisted artifacts under `data/processed/`, so modeling never re-parses raw TRC:
+
+- **`manifest.jsonl`** — one JSON line per clip: interim path, subject, emotion
+  (code + name), take, raw frame count, and the kept `[trim_start, trim_stop)`
+  window with its length. Human-inspectable; it is the index the sequence build
+  consumes.
+- **`sequences.npz`** — the approach-B input (see *length handling* below).
+
+**Trimming (motion onset/offset).** Each clip has standing/idle frames before
+the first step and after the last. With `DataConfig.detect_onset` (default on)
+the active walking window is found from **marker speed**: per frame, the mean
+inter-frame displacement over markers (NaN-robust, so occluded markers are
+ignored); a frame is "moving" once that exceeds `onset_speed_frac` of the clip's
+peak, and onset/offset are the first/last runs of `onset_min_run` consecutive
+moving frames. `trim_start_frames` / `trim_end_frames` then apply as an extra
+fixed margin *inside* that window. A clip is never trimmed to empty — if the
+margins would do so they are skipped. (On the bundled data this drops a median
+of ~50 leading/trailing static frames per clip.) Detection params live in
+`DataConfig`, so the policy is config-driven and recorded in the resolved config.
+
+**Variable-length handling (decision).** Clip lengths vary (≈73–372 frames on
+the bundled data). Rather than bake a fixed frame count into the dataset, the
+**canonical** store is *variable-length*: `sequences` is an object array of
+per-clip `(T_i, 41*3)` float32 arrays (already onset-trimmed), carried with
+`lengths`, `labels`, `emotion_codes`, `subjects`, `clips` and `marker_names`.
+
+Rationale: the modeling frame count is a *training-time* hyperparameter we want
+to sweep (and to support sliding-window augmentation). Slicing a fixed window /
+length out of the variable-length arrays is an in-memory numpy operation on a
+few tens of MB — milliseconds, cheaper than the disk read — so there is no
+speed reason to freeze `N` at build time, and zero-padding up front would force
+every consumer to carry a mask to avoid training on fake frames. Persisting the
+true-length sequences keeps that decision out of the dataset.
+
+For callers that *do* want a ready-made fixed tensor, `--target-frames N`
+additionally writes a dense `sequences_dense` `(n_clips, N, 41*3)` (pad with
+zeros / truncate to `N`) plus a boolean `mask` marking the real frames. This is
+reproducible from the canonical store at any time, so freezing an `N` is a
+re-run, not a one-way door.
+
+**CSV output (#1).** The course brief asks for a `(coordinates, class)` dataset
+"as CSV". We persist the modeling artifacts as JSONL + npz instead (npz is the
+natural dense/ragged numeric container and avoids stringifying ~10⁶ floats per
+clip), and treat CSV as an *export* concern rather than the working format. A
+flat CSV of `manifest.jsonl` (one row per clip, the label and frame window) is a
+trivial `pandas.read_json(lines=True).to_csv(...)`; a long-format
+`(clip, frame, marker, x, y, z, emotion)` CSV is derivable from `sequences.npz`
+when an assignment deliverable needs it. Keeping the working store binary and
+generating CSV on demand avoids carrying a redundant, bulky third copy.
+
 ## Run directory (reproducibility contract)
 
 A checkpoint is never saved without the exact config that produced it beside it:

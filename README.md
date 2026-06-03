@@ -29,8 +29,8 @@ gitignored).
 Each step is a thin entry point; all logic lives in `src/expr_movements/`.
 
 ```sh
-uv run expr-parse          --raw-dir data/raw   --out-dir data/interim
-uv run expr-build-dataset  --raw-dir data/raw   --out-dir data/processed
+uv run expr-parse          --raw-dir data/raw        --out-dir data/interim
+uv run expr-build-dataset  --interim-dir data/interim --out-dir data/processed   # + --target-frames N for a dense tensor
 uv run expr-featurize      --manifest data/processed/manifest.jsonl --out data/processed/features.parquet
 uv run expr-train          --config configs/experiment_rf.yaml      # approach A
 uv run expr-train          --config configs/experiment_lstm.yaml    # approach B
