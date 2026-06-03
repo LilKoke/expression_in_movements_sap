@@ -10,9 +10,15 @@ data:
   trim_start_frames: 0
   trim_end_frames: 0
 
+window:                   # fixed-length sliding window; prediction unit
+  length: 64              # <= shortest clip (~73 frames) to avoid padding
+  stride: 16
+
 split:
-  strategy: group_kfold   # subject-grouped — required to avoid leakage
-  n_splits: 5
+  # LOSO = the real inter-subject task (4 subjects -> 4 folds). Swap to
+  # `intra_subject` to reproduce the source paper's within-subject >90%.
+  strategy: leave_one_subject_out
+  n_splits: 4
   seed: 42
 
 model:
