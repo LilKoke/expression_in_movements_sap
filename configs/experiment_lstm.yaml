@@ -1,5 +1,8 @@
-# Approach B: neural network (LSTM) on raw pose sequences.
-# Same data + split as experiment_rf.yaml so the A-vs-B comparison is fair.
+# Approach B (comparison baseline): multi-task NN with an LSTM encoder.
+# Same data + window + split as experiment_rf.yaml / experiment_cnn1d.yaml so the
+# A-vs-B and CNN-vs-RNN comparisons are all fair (identical folds & windows).
+# The headline model is experiment_cnn1d.yaml; this is the RNN alternative the
+# roadmap keeps for encoder comparison.
 name: lstm
 seed: 42
 
@@ -10,11 +13,11 @@ data:
   trim_start_frames: 0
   trim_end_frames: 0
 
-window:                   # same windowing as experiment_rf.yaml -> fair A-vs-B
+window:                   # same windowing as the other configs -> fair comparison
   length: 64
   stride: 16
 
-split:                    # same folds as experiment_rf.yaml -> fair A-vs-B
+split:                    # same folds -> fair comparison
   strategy: leave_one_subject_out
   n_splits: 4
   seed: 42
@@ -22,10 +25,13 @@ split:                    # same folds as experiment_rf.yaml -> fair A-vs-B
 model:
   name: lstm
   params:
-    hidden_size: 128
-    num_layers: 2
+    encoder: lstm
+    latent_dim: 32        # PCA-visualised latent dimensionality (Phase 7)
+    hidden_size: 64
     dropout: 0.2
+    alpha: 1.0            # reconstruction-loss weight
+    beta: 1.0             # classification-loss weight
     lr: 0.001
-    epochs: 50
+    epochs: 40
     batch_size: 32
     random_state: 42

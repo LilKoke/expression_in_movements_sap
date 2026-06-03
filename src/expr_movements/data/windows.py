@@ -81,12 +81,16 @@ class WindowSet:
     ``X`` is ``(n_windows, length, F)`` float32; ``mask`` ``(n_windows, length)``
     bool (False on padded frames of short clips). ``y`` is the per-window label;
     ``clip_idx`` the source clip index per window (for clip-level majority vote).
+    ``has_speed`` mirrors the dataset's ``has_speed_channel`` (whether the last
+    feature column is the walking-speed channel) so a model that treats speed
+    specially — e.g. the NN concatenating it onto the latent — knows where it is.
     """
 
     X: np.ndarray
     mask: np.ndarray
     y: np.ndarray
     clip_idx: np.ndarray
+    has_speed: bool = False
 
 
 def _clip_windows(seq: np.ndarray, length: int, stride: int) -> tuple[np.ndarray, np.ndarray]:
@@ -137,12 +141,14 @@ def make_windows(
             mask=np.zeros((0, length), bool),
             y=np.array([], dtype=object),
             clip_idx=np.array([], dtype=np.int64),
+            has_speed=ds.has_speed_channel,
         )
     return WindowSet(
         X=np.concatenate(xs),
         mask=np.concatenate(masks),
         y=np.concatenate(ys),
         clip_idx=np.concatenate(idxs),
+        has_speed=ds.has_speed_channel,
     )
 
 
@@ -176,7 +182,7 @@ def apply_scaler(ws: WindowSet, mean: np.ndarray, std: np.ndarray) -> WindowSet:
     x = (ws.X - mean) / std
     x = np.nan_to_num(x, nan=0.0).astype(np.float32)
     x[~ws.mask] = 0.0
-    return WindowSet(X=x, mask=ws.mask, y=ws.y, clip_idx=ws.clip_idx)
+    return WindowSet(X=x, mask=ws.mask, y=ws.y, clip_idx=ws.clip_idx, has_speed=ws.has_speed)
 
 
 def flatten_windows(ws: WindowSet) -> np.ndarray:

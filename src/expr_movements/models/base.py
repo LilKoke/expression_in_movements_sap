@@ -20,9 +20,16 @@ class BaseClassifier(ClassifierMixin, BaseEstimator):
     """Abstract base for all classifiers in this project.
 
     Note: ``X`` differs by approach — a 2-D feature table for classic ML, a 3-D
-    ``(n, n_frames, n_markers*3)`` sequence tensor for the NN. Each model declares
-    which processed artifact it consumes; the objects stay interface-identical.
+    ``(n, length, F)`` window tensor for the NN. ``consumes`` declares which of
+    the two each model wants so the shared harness (``train.py``) can hand it the
+    right shape: ``"table"`` -> flattened windows, ``"window"`` -> the raw
+    ``WindowSet``. The objects stay interface-identical (``fit``/``predict``);
+    only the ``X`` they're fed differs.
     """
+
+    #: "table" -> harness passes flattened ``(n, length*F)``; "window" -> the
+    #: ``WindowSet`` itself (NN keeps the ``(n, length, F)`` shape + mask).
+    consumes: str = "table"
 
     @abstractmethod
     def fit(self, X, y) -> "BaseClassifier":  # returns self
