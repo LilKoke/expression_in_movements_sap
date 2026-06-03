@@ -39,7 +39,19 @@ class DataConfig(_Strict):
     interim_dir: Path = Path("data/interim")
     processed_dir: Path = Path("data/processed")
 
-    # Trim the start/end of each motion (frames) to drop standing/idle padding.
+    # Drop the standing/idle frames before walking starts and after it ends.
+    # When ``detect_onset`` is on, the active window is found from marker speed
+    # (see ``data/dataset.py``); ``trim_start_frames`` / ``trim_end_frames`` are
+    # then applied as an *additional* fixed margin inside the detected window.
+    # With detection off they are the only trimming and act on the raw clip.
+    detect_onset: bool = True
+    # Speed threshold as a fraction of each clip's peak marker speed: a frame is
+    # "moving" once the body's mean marker speed exceeds this fraction of the
+    # clip's max.
+    onset_speed_frac: float = Field(0.1, gt=0, lt=1)
+    # Require this many consecutive moving frames before declaring onset, to
+    # ignore brief jitter at the start (and symmetrically for offset).
+    onset_min_run: int = Field(3, ge=1)
     trim_start_frames: int = Field(0, ge=0)
     trim_end_frames: int = Field(0, ge=0)
 
