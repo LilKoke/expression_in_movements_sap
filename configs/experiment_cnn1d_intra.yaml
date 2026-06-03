@@ -1,0 +1,30 @@
+# intra-subject protocol (per-subject trial-level KFold) for cnn1d — Venture 2014 >90% comparison.
+name: cnn1d_intra
+seed: 42
+data:
+  raw_dir: data/raw
+  interim_dir: data/interim
+  processed_dir: data/processed
+  trim_start_frames: 0
+  trim_end_frames: 0
+window:
+  length: 64
+  stride: 16
+split:
+  strategy: intra_subject
+  n_splits: 5
+  seed: 42
+model:
+  name: cnn1d
+  params:
+    encoder: cnn1d
+    latent_dim: 32
+    hidden_size: 64
+    kernel_size: 5
+    dropout: 0.2
+    alpha: 1.0
+    beta: 1.0
+    lr: 0.001
+    epochs: 40
+    batch_size: 32
+    random_state: 42
