@@ -22,14 +22,17 @@ from expr_movements.data.dataset import (
 )
 
 
-def _write_interim(path, frames, *, subject="SUBA", code="COE", emotion="angry", take=1):
+def _write_interim(
+    path, frames, *, subject="SUBA", code="COE", emotion="angry", take=1, marker_names=None
+):
     """Write a synthetic interim clip npz like ``expr-parse`` produces."""
     n_markers = frames.shape[1]
+    names = marker_names if marker_names is not None else [f"M{i}" for i in range(n_markers)]
     np.savez_compressed(
         path,
         frames=frames.astype(np.float64),
         times=np.arange(frames.shape[0], dtype=np.float64) / 60.0,
-        marker_names=np.asarray([f"M{i}" for i in range(n_markers)], dtype=object),
+        marker_names=np.asarray(names, dtype=object),
         frame_rate=60.0,
         subject=subject,
         emotion_code=code,
@@ -125,8 +128,12 @@ def test_build_manifest_raises_on_empty_dir(tmp_path):
 def test_build_sequence_dataset_variable_length(interim_dir, tmp_path):
     out_dir = tmp_path / "processed"
     manifest = out_dir / "manifest.jsonl"
-    build_manifest(interim_dir, manifest, cfg=DataConfig(onset_min_run=2))
-    npz = build_sequence_dataset(manifest, out_dir / "sequences.npz")
+    # These synthetic clips use placeholder markers (M0/M1) without a pelvis, so
+    # normalize off keeps raw flattened coords — this test covers the
+    # variable-length store mechanics; invariance is tested in test_preprocess.
+    cfg = DataConfig(onset_min_run=2, normalize=False)
+    build_manifest(interim_dir, manifest, cfg=cfg)
+    npz = build_sequence_dataset(manifest, out_dir / "sequences.npz", cfg=cfg)
 
     data = np.load(npz, allow_pickle=True)
     seqs = data["sequences"]
@@ -142,8 +149,9 @@ def test_build_sequence_dataset_variable_length(interim_dir, tmp_path):
 def test_build_sequence_dataset_dense(interim_dir, tmp_path):
     out_dir = tmp_path / "processed"
     manifest = out_dir / "manifest.jsonl"
-    build_manifest(interim_dir, manifest, cfg=DataConfig(onset_min_run=2))
-    npz = build_sequence_dataset(manifest, out_dir / "sequences.npz", target_frames=8)
+    cfg = DataConfig(onset_min_run=2, normalize=False)  # placeholder markers; see above
+    build_manifest(interim_dir, manifest, cfg=cfg)
+    npz = build_sequence_dataset(manifest, out_dir / "sequences.npz", target_frames=8, cfg=cfg)
 
     data = np.load(npz, allow_pickle=True)
     dense = data["sequences_dense"]
@@ -155,3 +163,28 @@ def test_build_sequence_dataset_dense(interim_dir, tmp_path):
         assert mask[i].sum() == min(int(length), 8)
     # Padded frames are zero where the mask is False.
     assert np.all(dense[~mask] == 0)
+
+
+def test_build_sequence_dataset_normalized_has_speed_channel(tmp_path):
+    """End-to-end with pelvis-bearing markers: normalized + speed column + layout."""
+    interim = tmp_path / "interim"
+    interim.mkdir()
+    markers = ["S_LFWT", "S_RFWT", "S_LBWT", "S_RBWT", "S_HEAD"]  # 5 markers incl. pelvis
+    _write_interim(
+        interim / "SUBALFWT_COE01.4.npz",
+        _moving_clip(2, 8, 2, n_markers=5),
+        subject="SUBA",
+        marker_names=markers,
+    )
+    out_dir = tmp_path / "processed"
+    manifest = out_dir / "manifest.jsonl"
+    cfg = DataConfig(onset_min_run=2)  # normalize on (default), keep_speed on
+    build_manifest(interim, manifest, cfg=cfg)
+    npz = build_sequence_dataset(manifest, out_dir / "sequences.npz", cfg=cfg)
+
+    data = np.load(npz, allow_pickle=True)
+    # 5 markers * 3 + 1 speed column.
+    assert data["sequences"][0].shape[1] == 5 * 3 + 1
+    assert bool(data["has_speed_channel"]) is True
+    assert str(data["feature_layout"]) == "pose_local_yaw+speed"
+    assert int(data["n_markers"]) == 5

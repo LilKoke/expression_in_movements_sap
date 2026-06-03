@@ -144,6 +144,46 @@ trivial `pandas.read_json(lines=True).to_csv(...)`; a long-format
 when an assignment deliverable needs it. Keeping the working store binary and
 generating CSV on demand avoids carrying a redundant, bulky third copy.
 
+## Invariant pre-processing (Phase 3, #5)
+
+The classifier must key on *how* a subject moves, not *where* in the capture
+volume they walked or *which way* they faced. So before a clip's trimmed pose
+sequence is stored in `sequences.npz`, `features/preprocess.py`
+(`normalize_sequence`) makes it **position- and heading-invariant**, while
+deliberately **keeping walking speed** as an explicit channel (speed tracks
+arousal — a strong emotion cue, per Venture et al. 2014, the source paper for
+this data). This is the **common representation** consumed by both modeling
+teams (per the #1 roadmap v2, Phase 3 stops here — no derived expert features
+are computed in this repo; that is the other team's approach-A work).
+
+Per clip, in order:
+
+1. **Pelvis-centred local coordinates.** Each frame is translated so the
+   centroid of the four pelvis markers (`LFWT/RFWT/LBWT/RBWT`) sits at the
+   origin — removing absolute walking position and the slow drift across the
+   room. Markers carry a per-subject prefix (`NABA_LFWT`); they are matched by
+   the bare token after the last `_`. The centroid is NaN-robust, so an occluded
+   pelvis marker doesn't poison it; a frame with *no* pelvis markers is left
+   unshifted rather than dropped.
+2. **Yaw alignment** (`yaw_align`, default on). Each frame is rotated about the
+   vertical (`up_axis`, Y here) so the pelvis left→right axis points in a fixed
+   direction — removing heading. **Pitch and roll are left intact** (trunk lean,
+   head orientation) because those carry posture/emotion; only the horizontal
+   heading is normalized away.
+3. **Speed channel** (`keep_speed`, default on). The per-frame body speed —
+   the pelvis-centroid displacement magnitude in **world** coordinates, computed
+   *before* centring (centring would zero it) — is appended as a trailing
+   column. So a stored sequence is `(T, 41*3 + 1)`: 123 pose columns then 1
+   speed column.
+
+All four behaviours are `DataConfig` fields (`normalize`, `pelvis_markers`,
+`yaw_align`, `keep_speed`, `up_axis`), so the policy is config-driven and
+recorded in the resolved config. With `normalize=False` the raw flattened
+`(T, 41*3)` world coordinates are stored unchanged (used by the synthetic
+dataset tests, which have no pelvis markers). `sequences.npz` records the column
+split via `feature_layout` (`"pose_local_yaw+speed"`), `has_speed_channel` and
+`n_markers`, so consumers split pose vs. speed by metadata rather than guessing.
+
 ## Run directory (reproducibility contract)
 
 A checkpoint is never saved without the exact config that produced it beside it:

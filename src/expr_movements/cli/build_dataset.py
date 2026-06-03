@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> None:
     sequences_path = out_dir / "sequences.npz"
 
     build_manifest(args.interim_dir, manifest_path, cfg=cfg)
-    build_sequence_dataset(manifest_path, sequences_path, target_frames=args.target_frames)
+    build_sequence_dataset(manifest_path, sequences_path, target_frames=args.target_frames, cfg=cfg)
 
 
 if __name__ == "__main__":

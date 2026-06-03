@@ -55,6 +55,27 @@ class DataConfig(_Strict):
     trim_start_frames: int = Field(0, ge=0)
     trim_end_frames: int = Field(0, ge=0)
 
+    # Invariant pre-processing (Phase 3, #5). Make the pose sequence invariant to
+    # where in the room the subject walked and which way they faced, while
+    # keeping the walking *speed* as an explicit feature (it carries emotion —
+    # arousal). See ``features/preprocess.py``.
+    #   - normalize: master switch. Off -> raw world coordinates are stored.
+    #   - pelvis_markers: bare marker tokens (suffix after the last "_") whose
+    #     centroid defines the per-frame body origin. All four exist in every
+    #     bundled clip; names carry a per-subject prefix (e.g. ``NABA_LFWT``).
+    #   - yaw_align: rotate each frame about the vertical axis so the pelvis
+    #     left->right axis points the same way (heading removed; pitch/roll kept).
+    #   - keep_speed: append the per-frame body speed (pre-normalization,
+    #     world-scale) as one extra channel so arousal cues survive.
+    normalize: bool = True
+    pelvis_markers: tuple[str, ...] = ("LFWT", "RFWT", "LBWT", "RBWT")
+    yaw_align: bool = True
+    keep_speed: bool = True
+    # Index (0/1/2) of the vertical (gravity) axis in the marker coordinates.
+    # yaw rotation is applied in the plane of the other two axes. TRC here is
+    # Y-up (axis 1).
+    up_axis: int = Field(1, ge=0, le=2)
+
 
 class SplitConfig(_Strict):
     """Train/test split. MUST be subject-grouped to avoid leakage (see docs)."""

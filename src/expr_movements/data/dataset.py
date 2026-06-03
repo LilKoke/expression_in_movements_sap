@@ -10,10 +10,15 @@ written to ``data/processed/``:
     index that :func:`build_sequence_dataset` consumes.
 
 ``sequences.npz``
-    The approach-B input. Clip lengths vary, so the canonical store is a
-    **variable-length** object array ``sequences`` of ``(T_i, 41*3)`` float32
-    arrays (one per clip, already onset-trimmed), alongside ``lengths``,
-    ``labels``, ``subjects`` and ``marker_names``. Training slices any fixed
+    The common modeling input. Clip lengths vary, so the canonical store is a
+    **variable-length** object array ``sequences`` of ``(T_i, F)`` float32
+    arrays (one per clip, already onset-trimmed *and* invariance-normalized),
+    alongside ``lengths``, ``labels``, ``subjects`` and ``marker_names``. Each
+    sequence has been made position/heading-invariant by the Phase-3
+    pre-processing (pelvis-local coordinates + yaw alignment, with walking speed
+    kept as a trailing channel — see ``features/preprocess.py``); ``F`` is
+    ``41*3`` plus one for that speed channel, and ``feature_layout`` /
+    ``has_speed_channel`` describe the column split. Training slices any fixed
     window / length out of these in memory (cheap — the whole set is a few tens
     of MB), so the modeling frame count is never baked into the dataset.
 
@@ -38,6 +43,7 @@ from pathlib import Path
 import numpy as np
 
 from expr_movements.config import DataConfig
+from expr_movements.features.preprocess import normalize_sequence
 
 
 def _interim_npz(interim_dir: Path) -> list[Path]:
@@ -174,12 +180,18 @@ def _read_manifest(manifest_path: Path) -> list[dict]:
         return [json.loads(line) for line in f if line.strip()]
 
 
-def _clip_sequence(rec: dict) -> np.ndarray:
-    """Load one clip's trimmed, flattened ``(T, n_markers*3)`` float32 array."""
+def _clip_sequence(rec: dict, cfg: DataConfig) -> np.ndarray:
+    """Load one clip's trimmed, invariance-normalized ``(T, F)`` float32 array.
+
+    Trims to the active window recorded in the manifest, then applies the
+    Phase-3 invariant pre-processing (pelvis-local coordinates + yaw alignment +
+    optional speed channel) per ``cfg``. ``F`` is ``n_markers*3`` (raw or
+    normalized) plus one if ``cfg.keep_speed``.
+    """
     d = np.load(rec["interim_path"], allow_pickle=True)
     frames = d["frames"][rec["trim_start"] : rec["trim_stop"]]  # (T, n_markers, 3)
-    flat = frames.reshape(frames.shape[0], -1)  # (T, n_markers*3)
-    return flat.astype(np.float32)
+    marker_names = [str(m) for m in d["marker_names"]]
+    return normalize_sequence(frames, marker_names, cfg)
 
 
 def _pad_or_truncate(seq: np.ndarray, target: int) -> tuple[np.ndarray, np.ndarray]:
@@ -202,16 +214,26 @@ def build_sequence_dataset(
     manifest_path: str | Path,
     out_path: str | Path,
     target_frames: int | None = None,
+    cfg: DataConfig | None = None,
 ) -> Path:
     """Write the approach-B sequence dataset (``.npz``) from a manifest.
 
+    Each clip is trimmed to its active window and run through the Phase-3
+    invariant pre-processing (pelvis-local coordinates + yaw alignment +
+    optional speed channel) per ``cfg`` (default :class:`DataConfig`), so the
+    stored sequences are position/heading-invariant — the common contract both
+    the NN team and the expert-feature team consume.
+
     Always stores the variable-length canonical form: an object array
-    ``sequences`` of per-clip ``(T_i, n_markers*3)`` float32 arrays plus
-    ``lengths``, ``labels``, ``emotion_codes``, ``subjects``, ``clips`` and
-    ``marker_names``. When ``target_frames`` is given, additionally stores a
-    dense ``sequences_dense`` ``(n_clips, target_frames, n_markers*3)`` and its
-    ``mask`` (pad/truncate to ``target_frames``). Returns ``out_path``.
+    ``sequences`` of per-clip ``(T_i, F)`` float32 arrays plus ``lengths``,
+    ``labels``, ``emotion_codes``, ``subjects``, ``clips`` and ``marker_names``.
+    ``F`` is ``n_markers*3`` plus one when ``cfg.keep_speed`` (the trailing
+    column is body speed); ``feature_layout`` and ``has_speed_channel`` record
+    this. When ``target_frames`` is given, additionally stores a dense
+    ``sequences_dense`` ``(n_clips, target_frames, F)`` and its ``mask``
+    (pad/truncate to ``target_frames``). Returns ``out_path``.
     """
+    cfg = cfg or DataConfig()
     manifest_path = Path(manifest_path)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -220,7 +242,7 @@ def build_sequence_dataset(
     if not records:
         raise ValueError(f"empty manifest: {manifest_path}")
 
-    sequences = [_clip_sequence(rec) for rec in records]
+    sequences = [_clip_sequence(rec, cfg) for rec in records]
     lengths = np.asarray([s.shape[0] for s in sequences], dtype=np.int64)
     labels = np.asarray([rec["emotion"] for rec in records], dtype=object)
     emotion_codes = np.asarray([rec["emotion_code"] for rec in records], dtype=object)
@@ -234,6 +256,12 @@ def build_sequence_dataset(
     seq_obj = np.empty(len(sequences), dtype=object)
     seq_obj[:] = sequences
 
+    n_markers = len(marker_names)
+    has_speed = bool(cfg.normalize and cfg.keep_speed)
+    layout = "pose_local_yaw" if cfg.normalize else "pose_world"
+    if has_speed:
+        layout += "+speed"
+
     arrays: dict[str, np.ndarray] = {
         "sequences": seq_obj,
         "lengths": lengths,
@@ -242,6 +270,12 @@ def build_sequence_dataset(
         "subjects": subjects,
         "clips": clips,
         "marker_names": marker_names,
+        # Feature-layout contract: first ``n_markers*3`` columns are the
+        # (normalized) marker XYZ; the trailing column is body speed iff
+        # ``has_speed_channel``. Consumers split on these rather than guessing.
+        "feature_layout": np.asarray(layout),
+        "n_markers": np.asarray(n_markers),
+        "has_speed_channel": np.asarray(has_speed),
     }
 
     if target_frames is not None:
