@@ -1,0 +1,23 @@
+# Approach A: expert features + RandomForest.
+# Swap to approach B by pointing `expr-train --config` at experiment_lstm.yaml.
+name: rf
+seed: 42
+
+data:
+  raw_dir: data/raw
+  interim_dir: data/interim
+  processed_dir: data/processed
+  trim_start_frames: 0
+  trim_end_frames: 0
+
+split:
+  strategy: group_kfold   # subject-grouped — required to avoid leakage
+  n_splits: 5
+  seed: 42
+
+model:
+  name: random_forest
+  params:
+    n_estimators: 300
+    max_depth: null
+    random_state: 42
