@@ -6,7 +6,8 @@ a trailing world-space speed channel — see :mod:`features.preprocess`). That
 store is the common contract the expert-feature team consumes, so nothing here
 re-reads raw TRC or re-normalizes.
 
-Four features, matching the design doc's mathematical definitions:
+Four features, matching the design doc's definitions (the stride and arm-swing
+definitions follow the refinements from PR #27):
 
 ``walking_speed``
     Mean of the per-frame body speed ``s(t)`` (the trailing speed channel),
@@ -14,15 +15,19 @@ Four features, matching the design doc's mathematical definitions:
     Tracks arousal.
 
 ``stride_length_proxy``
-    Mean of the left/right heel marker (``LHEE``/``RHEE``) travel **range along
-    the walking direction**. After yaw alignment the heading is fixed, so the
-    forward axis is a stable coordinate; the per-clip max-minus-min of a heel's
-    forward coordinate approximates how far it swings each stride.
+    Range over the clip of the **fore-aft separation between the two ankles**
+    (``LANK``/``RANK``) along the walking direction. At mid-stance the ankles are
+    together (separation ~0); at full stride one is forward and the other back,
+    so the max-minus-min of ``L_forward - R_forward`` tracks stride length. Using
+    the left-right *difference* makes it robust to any residual common-mode
+    drift.
 
 ``arm_swing_mean``
-    Same range statistic for the wrist markers (``LWRA``/``RWRA``) along the
-    walking direction — captures arm-swing amplitude (suppressed when sad,
-    exaggerated when happy/angry).
+    Mean of the left/right arm-swing amplitudes, each measured as the range of
+    the wrist's fore-aft position **relative to the same-side shoulder**. Wrists
+    are the mean of ``WRA``/``WRB``; subtracting the shoulder (``SHO``) removes
+    trunk sway so the value isolates the pendulum motion of the arm (suppressed
+    when sad, exaggerated when happy/angry).
 
 ``head_vertical_range``
     Vertical (up-axis) travel range of the head-marker centroid
@@ -43,13 +48,19 @@ from __future__ import annotations
 
 import numpy as np
 
-# Bare marker tokens (the suffix after the last "_"; real names carry a
-# per-subject prefix like ``NABA_LHEE``) used by the features.
-HEEL_MARKERS: tuple[str, ...] = ("LHEE", "RHEE")
-WRIST_MARKERS: tuple[str, ...] = ("LWRA", "RWRA")
+# --- Marker tokens (bare; real names carry a per-subject prefix like ``NABA_LANK``). ---
+# stride: fore-aft separation between the two ankles.
+ANKLE_LEFT = "LANK"
+ANKLE_RIGHT = "RANK"
+# arm swing: per-side wrist (mean of WRA/WRB) relative to the same-side shoulder.
+ARM_LEFT_WRISTS: tuple[str, ...] = ("LWRA", "LWRB")
+ARM_RIGHT_WRISTS: tuple[str, ...] = ("RWRA", "RWRB")
+ARM_LEFT_SHOULDER = "LSHO"
+ARM_RIGHT_SHOULDER = "RSHO"
+# head bob: centroid of the four head markers.
 HEAD_MARKERS: tuple[str, ...] = ("LFHD", "RFHD", "LBHD", "RBHD")
 
-# Column order in the parquet table (metadata columns are prepended elsewhere).
+# Column order in the parquet table (identity columns are prepended elsewhere).
 FEATURE_NAMES: tuple[str, ...] = (
     "walking_speed",
     "stride_length_proxy",
@@ -59,7 +70,7 @@ FEATURE_NAMES: tuple[str, ...] = (
 
 
 def _bare(name: str) -> str:
-    """Marker token without its subject prefix: ``"NABA_LHEE" -> "LHEE"``."""
+    """Marker token without its subject prefix: ``"NABA_LANK" -> "LANK"``."""
     return name.rsplit("_", 1)[-1]
 
 
@@ -92,6 +103,13 @@ def _marker_axis(seq: np.ndarray, idx: int, axis: int) -> np.ndarray:
     return seq[:, 3 * idx + axis]
 
 
+def _markers_mean_axis(seq: np.ndarray, idxs: list[int], axis: int) -> np.ndarray:
+    """NaN-robust mean over markers of their ``axis`` series: ``(T,)``."""
+    stacked = np.stack([_marker_axis(seq, i, axis) for i in idxs], axis=0)  # (k, T)
+    with np.errstate(invalid="ignore"):
+        return np.nanmean(stacked, axis=0)
+
+
 def _range(values: np.ndarray) -> float:
     """NaN-robust max-minus-min of a 1-D series; NaN if every entry is NaN."""
     if not np.any(np.isfinite(values)):
@@ -116,29 +134,35 @@ def walking_speed(seq: np.ndarray, has_speed: bool) -> float:
     return float(np.nanmean(speed)) if np.any(np.isfinite(speed)) else float("nan")
 
 
-def _markers_axis_range_mean(
-    seq: np.ndarray, tok2idx: dict[str, int], tokens: tuple[str, ...], axis: int
-) -> float:
-    """Mean over ``tokens`` of each marker's travel range along ``axis``."""
-    ranges = [_range(_marker_axis(seq, tok2idx[t], axis)) for t in tokens]
-    return float(np.nanmean(ranges)) if np.any(np.isfinite(ranges)) else float("nan")
-
-
 def stride_length_proxy(seq: np.ndarray, tok2idx: dict[str, int], up_axis: int) -> float:
-    """Mean L/R heel travel range along the walking direction."""
-    return _markers_axis_range_mean(seq, tok2idx, HEEL_MARKERS, forward_axis(up_axis))
+    """Range of the fore-aft separation between the two ankles (PR #27 definition)."""
+    fwd = forward_axis(up_axis)
+    left = _marker_axis(seq, tok2idx[ANKLE_LEFT], fwd)
+    right = _marker_axis(seq, tok2idx[ANKLE_RIGHT], fwd)
+    return _range(left - right)
+
+
+def _side_arm_swing(
+    seq: np.ndarray, tok2idx: dict[str, int], wrists: tuple[str, ...], shoulder: str, fwd: int
+) -> float:
+    """One side's arm-swing amplitude: range of (wrist - shoulder) along forward."""
+    wrist = _markers_mean_axis(seq, [tok2idx[t] for t in wrists], fwd)
+    shoulder_series = _marker_axis(seq, tok2idx[shoulder], fwd)
+    return _range(wrist - shoulder_series)
 
 
 def arm_swing_mean(seq: np.ndarray, tok2idx: dict[str, int], up_axis: int) -> float:
-    """Mean L/R wrist travel range along the walking direction."""
-    return _markers_axis_range_mean(seq, tok2idx, WRIST_MARKERS, forward_axis(up_axis))
+    """Mean of L/R shoulder-relative wrist fore-aft swing (PR #27 definition)."""
+    fwd = forward_axis(up_axis)
+    left = _side_arm_swing(seq, tok2idx, ARM_LEFT_WRISTS, ARM_LEFT_SHOULDER, fwd)
+    right = _side_arm_swing(seq, tok2idx, ARM_RIGHT_WRISTS, ARM_RIGHT_SHOULDER, fwd)
+    sides = np.array([left, right])
+    return float(np.nanmean(sides)) if np.any(np.isfinite(sides)) else float("nan")
 
 
 def head_vertical_range(seq: np.ndarray, tok2idx: dict[str, int], up_axis: int) -> float:
     """Vertical travel range of the head-marker centroid (head bob amplitude)."""
-    cols = [3 * tok2idx[t] + up_axis for t in HEAD_MARKERS]
-    with np.errstate(invalid="ignore"):
-        head_y = np.nanmean(seq[:, cols], axis=1)  # (T,) per-frame head centroid height
+    head_y = _markers_mean_axis(seq, [tok2idx[t] for t in HEAD_MARKERS], up_axis)
     return _range(head_y)
 
 

@@ -45,15 +45,15 @@ from expr_movements.features.expert import (  # noqa: E402
 from expr_movements.features.preprocess import normalize_sequence  # noqa: E402
 
 # --- 特徴量が依存するマーカー（bare トークン）。色分け表示に使う。 ---
-HEELS = {"LHEE", "RHEE"}  # stride_length_proxy
-WRISTS = {"LWRA", "RWRA"}  # arm_swing_mean
+ANKLES = {"LANK", "RANK"}  # stride_length_proxy（足首の前進差）
+ARM = {"LWRA", "LWRB", "RWRA", "RWRB", "LSHO", "RSHO"}  # arm_swing_mean（手首-肩）
 HEAD = {"LFHD", "RFHD", "LBHD", "RBHD"}  # head_vertical_range
 PELVIS = {"LFWT", "RFWT", "LBWT", "RBWT"}  # ローカル座標の原点（骨盤重心）
 
 # マーカー群ごとの色・凡例・サイズ
 _GROUP_STYLE = {
-    "heel": ("#ff7f0e", "heels (stride)", 55),
-    "wrist": ("#2ca02c", "wrists (arm swing)", 55),
+    "ankle": ("#ff7f0e", "ankles (stride)", 55),
+    "arm": ("#2ca02c", "wrist/shoulder (arm swing)", 55),
     "head": ("#1f77b4", "head (head vert)", 55),
     "pelvis": ("#d62728", "pelvis (origin)", 55),
     "other": ("#9aa0a6", "other", 18),
@@ -113,10 +113,10 @@ def _bare(name: str) -> str:
 
 
 def _group_of(token: str) -> str:
-    if token in HEELS:
-        return "heel"
-    if token in WRISTS:
-        return "wrist"
+    if token in ANKLES:
+        return "ankle"
+    if token in ARM:
+        return "arm"
     if token in HEAD:
         return "head"
     if token in PELVIS:

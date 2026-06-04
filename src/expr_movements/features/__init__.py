@@ -33,10 +33,12 @@ def build_feature_table(
     Reads the canonical ``sequences.npz`` (the common contract — normalized,
     yaw-aligned per-clip pose with a trailing speed channel) and computes the
     :mod:`features.expert` descriptors for every clip. The output frame carries
-    the clip's identity/label columns (``clip``, ``subject``, ``emotion``,
-    ``emotion_code``) followed by one column per feature in
-    :data:`features.expert.FEATURE_NAMES`, so the split layer can group by
-    subject exactly as the sequence pipeline does. Returns ``out_path``.
+    the clip's identity/label columns (``clip_idx``, ``clip``, ``subject``,
+    ``label``) followed by one column per feature in
+    :data:`features.expert.FEATURE_NAMES`. ``clip_idx`` is the row's position in
+    ``sequences.npz`` (the join key for later window/fold matching, per #20) and
+    ``label`` is the emotion class, so the split layer can group by subject
+    exactly as the sequence pipeline does. Returns ``out_path``.
     """
     sequences_path = Path(sequences_path)
     out_path = Path(out_path)
@@ -49,7 +51,6 @@ def build_feature_table(
     clips = data["clips"]
     subjects = data["subjects"]
     labels = data["labels"]
-    emotion_codes = data["emotion_codes"]
 
     rows = []
     for i, seq in enumerate(sequences):
@@ -58,15 +59,15 @@ def build_feature_table(
         )
         rows.append(
             {
+                "clip_idx": i,
                 "clip": str(clips[i]),
                 "subject": str(subjects[i]),
-                "emotion": str(labels[i]),
-                "emotion_code": str(emotion_codes[i]),
+                "label": str(labels[i]),
                 **feats,
             }
         )
 
-    columns = ["clip", "subject", "emotion", "emotion_code", *FEATURE_NAMES]
+    columns = ["clip_idx", "clip", "subject", "label", *FEATURE_NAMES]
     df = pd.DataFrame(rows, columns=columns)
     df.to_parquet(out_path, index=False)
     print(f"wrote features: {len(df)} clips x {len(FEATURE_NAMES)} features -> {out_path}")
