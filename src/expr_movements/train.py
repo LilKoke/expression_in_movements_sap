@@ -122,14 +122,50 @@ def _fit_fold(
     }
 
 
+EXPERT_FEATURE_COLUMNS = (
+    "walking_speed",
+    "stride_length_proxy",
+    "arm_swing_mean",
+    "head_vertical_range",
+)
+
+
+def _expert_feature_X(model: BaseClassifier, ws: WindowSet) -> np.ndarray:
+    """Return clip-level expert features broadcast to each source window."""
+
+    import pandas as pd
+
+    features_path = Path(getattr(model, "features_path", "data/processed/features.parquet"))
+    df = pd.read_parquet(features_path)
+
+    required = {"clip_idx", *EXPERT_FEATURE_COLUMNS}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"expert feature table missing columns: {sorted(missing)}")
+
+    feature_df = df.set_index("clip_idx")
+    missing_clips = sorted(set(map(int, ws.clip_idx)) - set(map(int, feature_df.index)))
+    if missing_clips:
+        raise ValueError(f"expert feature table missing clip_idx values: {missing_clips[:10]}")
+
+    x = feature_df.loc[ws.clip_idx, list(EXPERT_FEATURE_COLUMNS)].to_numpy(dtype=np.float32)
+    return x
+
+
 def _model_X(model: BaseClassifier, ws: WindowSet):
     """Hand each model the window representation it declares via ``consumes``.
 
     Classic ML wants a flat ``(n, length*F)`` feature table; the NN keeps the
-    ``(n, length, F)`` shape (and the mask) and so takes the ``WindowSet`` whole.
+    ``(n, length, F)`` shape (and the mask). Expert-feature models consume a
+    precomputed clip-level feature table, broadcast to each source window.
     This is the one place the shared harness forks on approach.
     """
-    return ws if getattr(model, "consumes", "table") == "window" else flatten_windows(ws)
+    consumes = getattr(model, "consumes", "table")
+    if consumes == "window":
+        return ws
+    if consumes == "expert":
+        return _expert_feature_X(model, ws)
+    return flatten_windows(ws)
 
 
 def _git_commit() -> str | None:

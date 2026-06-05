@@ -69,3 +69,27 @@ class SVMModel(BaseClassifier):
     def predict(self, X):
         check_is_fitted(self, "model_")
         return self.model_.predict(X)
+
+@register("random_forest_expert")
+class RandomForestExpertModel(RandomForestModel):
+    """RandomForest on precomputed expert features.
+
+    The training harness reads ``features_path`` when ``consumes == "expert"``
+    and supplies a 2-D ``(n_windows, n_features)`` table to this model.
+    """
+
+    consumes = "expert"
+
+    def __init__(
+        self,
+        n_estimators: int = 300,
+        max_depth: int | None = None,
+        random_state: int = 42,
+        features_path: str = "data/processed/features.parquet",
+    ):
+        super().__init__(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            random_state=random_state,
+        )
+        self.features_path = features_path
