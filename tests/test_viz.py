@@ -21,6 +21,7 @@ from expr_movements.config import ExperimentConfig, ModelConfig, SplitConfig, Wi
 from expr_movements.evaluate import compare_runs
 from expr_movements.train import run_training
 from expr_movements.viz import (
+    feature_pca,
     latent_pca,
     latent_windows,
     plot_confusion_matrix,
@@ -174,3 +175,27 @@ def test_generate_report_includes_protocol_when_intra_given(tmp_path):
 
     out_dir = generate_report(run_a, run_b, out_dir=tmp_path / "report", run_b_intra=run_b_intra)
     assert (out_dir / "protocol_comparison.md").exists()
+
+def test_feature_pca_writes_png(tmp_path):
+    """Expert-feature PCA writes a PNG from a clip-level feature table."""
+
+    import pandas as pd
+
+    features = pd.DataFrame(
+        {
+            "clip_idx": range(8),
+            "clip": [f"clip_{i}.npz" for i in range(8)],
+            "subject": ["A", "A", "B", "B", "C", "C", "D", "D"],
+            "label": ["calm", "excited"] * 4,
+            "walking_speed": np.linspace(1.0, 8.0, 8),
+            "stride_length_proxy": np.linspace(10.0, 80.0, 8),
+            "arm_swing_mean": np.linspace(100.0, 800.0, 8),
+            "head_vertical_range": np.linspace(5.0, 40.0, 8),
+        }
+    )
+
+    out = tmp_path / "feature_pca.png"
+    path = feature_pca(features, out, title="feature pca test")
+
+    assert path == out
+    assert out.exists() and out.stat().st_size > 0
