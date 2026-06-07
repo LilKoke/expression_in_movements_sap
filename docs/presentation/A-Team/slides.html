@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Team A — Approach A: Expert Features + RandomForest</title>
+<style>
+  :root{
+    --ink:#13294B; --teal:#1C7293; --cyan:#2A9D8F; --amber:#E9A23B; --coral:#E76F51;
+    --muted:#64748B; --panel:#EEF2F7; --line:#D8E0EA;
+    --happy:#E9A23B; --angry:#D1495B; --neutral:#6C7A89; --sad:#3D6CB9;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%; background:#000; overflow:hidden;
+    font-family:"Helvetica Neue",Arial,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;}
+  /* fixed 1280x720 stage, scaled to viewport */
+  #stage{position:absolute; top:50%; left:50%; width:1280px; height:720px;
+    transform:translate(-50%,-50%); transform-origin:center center;}
+  .slide{position:absolute; inset:0; display:none;}
+  .slide.on{display:block;}
+  .slide.light{background:#fff;}
+  .slide.dark{background:var(--ink);}
+  .el{position:absolute;}
+
+  .eyebrow{letter-spacing:4px; font-size:18px; font-weight:700; color:#9FB6D4;}
+  .ttl-xl{font-weight:800; line-height:1.1; color:#fff; font-size:62px;}
+  .sub{font-size:27px; color:#CADCFC;}
+  .kicker{font-size:20px; color:var(--teal); font-weight:700; letter-spacing:2px;}
+  .stitle{font-size:40px; font-weight:800; color:var(--ink);}
+  .stitle.w{color:#fff;}
+  .chips{display:flex; gap:12px;}
+  .chip{color:#fff; border-radius:999px; padding:8px 22px; font-size:23px; font-weight:700;}
+  .card{background:#fff; border-radius:14px; box-shadow:0 10px 30px rgba(0,0,0,.28); padding:10px; overflow:hidden;}
+  img,video{display:block; width:100%; height:100%; object-fit:contain;}
+  .capline{font-size:22px; color:var(--muted); text-align:center;}
+  .capline.w{color:#A9BBD6;}
+  .bul{color:#EAF1FA; font-size:24px; line-height:1.32;}
+  .bul .row{margin-bottom:20px;}
+  .bul b{color:#fff;}
+  .mk{font-weight:800; margin-right:8px;}
+  .foot{font-size:20px; color:#A9BBD6;}
+
+  /* presenter notes + chrome */
+  #notes{position:fixed; left:0; right:0; bottom:0; background:rgba(10,22,40,.96);
+    color:#EAF1FA; padding:16px 26px; font-size:19px; line-height:1.55; display:none;
+    border-top:3px solid var(--amber); max-height:42vh; overflow:auto;}
+  #notes.show{display:block;}
+  #notes .nlabel{color:var(--amber); font-size:13px; letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;}
+  #hud{position:fixed; right:14px; bottom:12px; color:#7E8AA0; font-size:13px;
+    font-variant-numeric:tabular-nums; background:rgba(0,0,0,.35); padding:3px 10px; border-radius:8px; z-index:5; transition:opacity .45s;}
+  #help{position:fixed; left:14px; bottom:12px; color:#7E8AA0; font-size:12.5px;
+    background:rgba(0,0,0,.35); padding:3px 10px; border-radius:8px; z-index:5; transition:opacity .45s;}
+  .uihide{opacity:0 !important;}
+  #progress{position:fixed; top:0; left:0; height:4px; background:var(--teal); width:0; z-index:6; transition:width .2s;}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<div id="stage">
+
+  <!-- ===== Slide 1 ===== -->
+  <section class="slide dark on" data-note="We're Team A. The task: recognise four emotions — happy, angry, neutral, sad — from motion-capture walking. As you can see, the SAME person walks very differently when happy versus sad. Team B feeds the raw motion to a neural network; we take the hand-crafted route — a few interpretable gait features.">
+    <div class="el eyebrow" style="top:64px; left:70px;">MOTION-CAPTURE EMOTION RECOGNITION</div>
+    <div class="el ttl-xl" style="top:118px; left:68px; width:560px;">Emotion<br>Classification from<br>Walking Motion</div>
+    <div class="el sub" style="top:430px; left:70px; width:540px;">Approach A — Expert Gait Features + RandomForest</div>
+    <div class="el chips" style="top:540px; left:70px;">
+      <span class="chip" style="background:var(--happy); color:var(--ink);">happy</span>
+      <span class="chip" style="background:var(--angry);">angry</span>
+      <span class="chip" style="background:var(--neutral);">neutral</span>
+      <span class="chip" style="background:var(--sad);">sad</span>
+    </div>
+    <div class="el foot" style="top:632px; left:72px; color:#CADCFC; font-weight:700;">Team A</div>
+    <div class="el card" style="top:96px; left:690px; width:530px; height:530px;">
+      <video id="hook" src="img/walk_compare.mp4" autoplay loop muted playsinline></video>
+    </div>
+  </section>
+
+  <!-- ===== Slide 2 ===== -->
+  <section class="slide light" data-note="We describe each walk with just four features: walking speed, a stride-length proxy, average arm swing, and the vertical range of head motion. They match intuition — energetic people walk fast with big arm swings; sad people slow down and drop the head. Before measuring them, we normalise every pose to pelvis-local coordinates and align the facing direction, so different people and walking directions stay comparable. Each clip becomes this single four-dimensional vector, classified by a RandomForest.">
+    <div class="el kicker" style="top:46px; left:70px;">METHOD</div>
+    <div class="el stitle" style="top:74px; left:70px;">The four expert features</div>
+    <div class="el" style="top:140px; left:36px; width:1208px; height:520px;">
+      <img src="img/gait_features.png" alt="four gait features on a real skeleton" />
+    </div>
+    <div class="el capline" style="top:650px; left:70px; width:1140px;">
+      Preprocessing: pelvis-local coordinates + yaw alignment → invariant to person &amp; walking direction
+    </div>
+  </section>
+
+  <!-- ===== Slide 3 ===== -->
+  <section class="slide light" data-note="We evaluate two ways. Intra-subject keeps the same people in training and test — comparable to Venture and colleagues' prior work at over ninety percent. Leave-one-subject-out tests on a person never seen in training — the realistic, harder task. Both split strictly by subject, so nobody appears in both sides.">
+    <div class="el kicker" style="top:46px; left:70px;">EVALUATION</div>
+    <div class="el stitle" style="top:74px; left:70px;">Same-person vs unseen-person</div>
+    <div class="el" style="top:150px; left:120px; width:1040px; height:430px;">
+      <img src="img/protocols.png" alt="intra-subject vs LOSO" />
+    </div>
+    <div class="el capline" style="top:610px; left:70px; width:1140px; font-size:25px; color:var(--ink);">
+      Intra-subject ≈ comparable to Venture et&nbsp;al. 2014 (&gt;90%)&nbsp;&nbsp;·&nbsp;&nbsp;LOSO = the realistic, harder task
+    </div>
+  </section>
+
+  <!-- ===== Slide 4 ===== -->
+  <section class="slide light" data-note="At the clip level, the same-person setting reaches Macro-F1 0.79 and 84 percent accuracy. On unseen people it drops to 0.53 and 58 percent — a 0.26 gap in Macro-F1. That gap is the headline: emotional expression is highly individual. Per class, sadness is easy at F1 0.90 — slow, collapsed posture is distinctive — while happiness is hardest at just 0.22, confused with neutral and angry.">
+    <div class="el kicker" style="top:46px; left:70px;">RESULTS · CLIP LEVEL</div>
+    <div class="el stitle" style="top:74px; left:70px;">Results — and the subject-dependence gap</div>
+    <div class="el" style="top:150px; left:24px; width:620px; height:470px;">
+      <img src="img/results_intra_vs_loso.png" alt="intra vs LOSO" />
+    </div>
+    <div class="el" style="top:150px; left:648px; width:610px; height:470px;">
+      <img src="img/perclass_f1_loso.png" alt="per-class F1 LOSO" />
+    </div>
+    <div class="el capline" style="top:640px; left:70px; width:1140px; font-size:25px; color:var(--ink);">
+      Subject-dependence gap ≈ <b style="color:var(--coral);">+0.26 Macro-F1</b>&nbsp;&nbsp;·&nbsp;&nbsp;sad easy (0.90), happy hardest (0.22)
+    </div>
+  </section>
+
+  <!-- ===== Slide 5 ===== -->
+  <section class="slide dark" data-note="Finally, the honest lesson. We compared against a naive baseline: same preprocessing, same splits, same RandomForest, but instead of four features it just flattens the full pose — about eight thousand numbers. It beats us — 0.63 versus 0.53 on unseen people — so four features discard too much. Yet that baseline is uninterpretable, and on seen people it hits perfect accuracy: a sign it memorises the individual, collapsing to 0.63 on unseen ones. Our features are person-invariant by design — a lower ceiling, but a more honest drop. The real takeaway from Approach A is the trade-off between interpretability and accuracy — which sets up the comparison with Team B's learned features.">
+    <div class="el kicker" style="top:46px; left:70px; color:var(--amber);">DISCUSSION</div>
+    <div class="el stitle w" style="top:74px; left:70px;">Interpretability vs accuracy — the real trade-off</div>
+    <div class="el card" style="top:150px; left:40px; width:600px; height:470px;">
+      <img src="img/expert_vs_flatten.png" alt="expert RF vs flatten RF" />
+    </div>
+    <div class="el bul" style="top:166px; left:680px; width:540px;">
+      <div class="row"><span class="mk" style="color:var(--coral);">▸</span>Same preprocessing, splits &amp; model — only the <b>features</b> differ: 4 vs ~7,936-D.</div>
+      <div class="row"><span class="mk" style="color:var(--coral);">▸</span>Flatten RF wins (0.63 &gt; 0.53 LOSO) → <b>4 features discard information.</b></div>
+      <div class="row"><span class="mk" style="color:var(--amber);">▸</span>But it's uninterpretable &amp; intra Acc = 1.00 → <b>memorises the person</b> (0.95→0.63).</div>
+      <div class="row"><span class="mk" style="color:var(--cyan);">▸</span>Ours is person-invariant: lower ceiling, <b>more honest</b> drop.</div>
+    </div>
+    <div class="el foot" style="top:650px; left:680px; width:540px; color:var(--amber); font-weight:700;">
+      → next: compare with Team B's learned features
+    </div>
+  </section>
+
+</div>
+
+<div id="notes"><div class="nlabel">Speaker notes</div><div id="notetext"></div></div>
+<div id="hud">1 / 5</div>
+<div id="help">→/Space next · ← prev · F fullscreen · S notes · 1–5 jump</div>
+
+<script>
+  const slides=[...document.querySelectorAll('.slide')];
+  const stage=document.getElementById('stage');
+  const hud=document.getElementById('hud');
+  const help=document.getElementById('help');
+  const notes=document.getElementById('notes');
+  const notetext=document.getElementById('notetext');
+  const progress=document.getElementById('progress');
+  const hook=document.getElementById('hook');
+  let i=0;
+
+  function fit(){
+    const s=Math.min(window.innerWidth/1280, window.innerHeight/720);
+    stage.style.transform=`translate(-50%,-50%) scale(${s})`;
+  }
+  function show(n){
+    i=Math.max(0, Math.min(slides.length-1, n));
+    slides.forEach((s,k)=>s.classList.toggle('on', k===i));
+    hud.textContent=`${i+1} / ${slides.length}`;
+    notetext.textContent=slides[i].dataset.note||'';
+    progress.style.width=`${(i+1)/slides.length*100}%`;
+    if(history.replaceState) history.replaceState(null,'',`#${i+1}`);
+    // play the hook video only on slide 1
+    if(hook){ if(i===0){ hook.play().catch(()=>{}); } else { hook.pause(); } }
+  }
+  function next(){ show(i+1); }
+  function prev(){ show(i-1); }
+
+  // auto-hide the on-screen chrome during presentation; reveal on activity
+  let uiTimer;
+  function poke(){
+    help.classList.remove('uihide'); hud.classList.remove('uihide');
+    clearTimeout(uiTimer);
+    uiTimer=setTimeout(()=>{ help.classList.add('uihide'); hud.classList.add('uihide'); }, 3000);
+  }
+  window.addEventListener('mousemove', poke);
+
+  window.addEventListener('resize', fit);
+  document.addEventListener('keydown', e=>{
+    poke();
+    if(['ArrowRight',' ','PageDown','l'].includes(e.key)){ e.preventDefault(); next(); }
+    else if(['ArrowLeft','PageUp','h'].includes(e.key)){ e.preventDefault(); prev(); }
+    else if(e.key==='Home'){ show(0); }
+    else if(e.key==='End'){ show(slides.length-1); }
+    else if(e.key==='f'||e.key==='F'){ if(!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); }
+    else if(e.key==='s'||e.key==='S'){ notes.classList.toggle('show'); }
+    else if(/^[1-9]$/.test(e.key)){ show(parseInt(e.key,10)-1); }
+  });
+  // click/tap to advance (ignore clicks on the video)
+  document.addEventListener('click', e=>{ if(e.target.tagName!=='VIDEO') next(); });
+
+  const start=parseInt((location.hash||'').replace('#',''),10);
+  fit(); show(Number.isFinite(start) ? start-1 : 0); poke();
+</script>
+</body>
+</html>
