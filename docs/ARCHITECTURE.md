@@ -196,7 +196,7 @@ outputs/rf_a1b2c3d4/
   metadata.json      # git commit, seed, データハッシュ, タイムスタンプ, 指標サマリ
   model.joblib       # (A) または model.pt (B)
   metrics.json       # accuracy, per-class F1, 混同行列
-  predictions.parquet
+  predictions.jsonl
 ```
 
 ディレクトリ名は `sha256(解決済み config)[:8]` を埋め込むので、同一 config は同じ

@@ -11,7 +11,7 @@ owner's requirement: "params + corresponding model are output together".
     ├── metadata.json    # git commit, seed, data hashes, timestamp, metrics summary
     ├── model.joblib     # (A) or model.pt (B)
     ├── metrics.json
-    └── predictions.parquet
+    └── predictions.jsonl
 
 ``Date.now``-style timestamps are injected by the caller (CLI), so this module
 stays deterministic and testable.
