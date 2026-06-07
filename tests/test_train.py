@@ -161,3 +161,52 @@ def test_intra_subject_protocol_runs(tmp_path):
     # metadata records the protocol so a run is self-describing
     meta = json.loads((run_dir / "metadata.json").read_text())
     assert meta["split_strategy"] == "intra_subject"
+
+def test_expert_model_broadcasts_clip_features_to_windows(tmp_path):
+    """Expert models use clip-level features repeated for each source window."""
+
+    import pandas as pd
+
+    import expr_movements.models.classic  # noqa: F401
+    from expr_movements.data.windows import SequenceDataset, make_windows
+    from expr_movements.models.registry import build_model
+    from expr_movements.train import EXPERT_FEATURE_COLUMNS, _model_X
+
+    processed = tmp_path / "processed"
+    processed.mkdir()
+    _write_synthetic_npz(processed / "sequences.npz", n_per_subject=1, length=25)
+
+    ds = SequenceDataset.load(processed / "sequences.npz")
+    features = pd.DataFrame(
+        {
+            "clip_idx": np.arange(len(ds)),
+            "clip": ds.clips.astype(str),
+            "subject": ds.subjects.astype(str),
+            "label": ds.labels.astype(str),
+            "walking_speed": np.arange(len(ds), dtype=np.float32),
+            "stride_length_proxy": np.arange(len(ds), dtype=np.float32) + 100,
+            "arm_swing_mean": np.arange(len(ds), dtype=np.float32) + 200,
+            "head_vertical_range": np.arange(len(ds), dtype=np.float32) + 300,
+        }
+    )
+    features_path = processed / "features.parquet"
+    features.to_parquet(features_path)
+
+    model = build_model(
+        "random_forest_expert",
+        n_estimators=10,
+        random_state=0,
+        features_path=str(features_path),
+    )
+
+    ws = make_windows(ds, np.array([0, 1]), length=20, stride=10)
+    x = _model_X(model, ws)
+
+    expected = (
+        features.set_index("clip_idx")
+        .loc[ws.clip_idx, list(EXPERT_FEATURE_COLUMNS)]
+        .to_numpy(dtype=np.float32)
+    )
+
+    assert x.shape == (len(ws.clip_idx), 4)
+    np.testing.assert_allclose(x, expected)
